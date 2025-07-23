@@ -1,0 +1,62 @@
+# Node modules
+node_modules/
+server/node_modules/
+webapp/node_modules/
+
+# Logs
+logs/
+server/logs/
+*.log
+
+# Database files
+server/data/*.db
+server/data/*.db-*
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Railway
+.railway/
+
+# Build outputs
+dist/
+build/
+
+# Test files
+server/test/
+test/
+
+# Documentation (not needed in production)
+docs/
+*.md
+!README.md
+
+# Arduino files (not needed for server)
+arduino/
+hardware/
+
+# Webapp build output (will be generated during build)
+webapp/dist/
