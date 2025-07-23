@@ -348,6 +348,15 @@ function getParadeStats() {
   };
 }
 
+/**
+ * Clear all boat states (for testing)
+ */
+function clearAllBoatStates() {
+  boatStates.clear();
+  boatHistory.clear();
+  logger.debug('Cleared all boat states');
+}
+
 module.exports = {
   updateBoatPosition,
   checkCorridor,
@@ -357,5 +366,6 @@ module.exports = {
   getBoatState,
   getAllBoatStates,
   getBoatHistory,
-  getParadeStats
+  getParadeStats,
+  clearAllBoatStates
 };
