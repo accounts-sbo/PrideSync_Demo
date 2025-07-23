@@ -1,0 +1,24 @@
+{
+  "name": "pridesync-monorepo",
+  "version": "1.0.0",
+  "description": "PrideSync - Pride Parade Coordination System",
+  "main": "backend/src/app.js",
+  "scripts": {
+    "start": "cd backend && npm start",
+    "dev": "cd backend && npm run dev",
+    "install-backend": "cd backend && npm install",
+    "install-frontend": "cd frontend && npm install",
+    "install-all": "npm run install-backend && npm run install-frontend",
+    "test": "cd backend && npm test"
+  },
+  "keywords": ["pride", "gps", "tracking", "parade", "railway", "vercel"],
+  "author": "PrideSync Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ]
+}

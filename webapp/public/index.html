@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PrideSync FM Beacon</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎉 PrideSync FM Beacon</h1>
+            <p>Realtime paradegeluid via lokale FM-frequenties</p>
+        </header>
+        
+        <main>
+            <div id="frequency-display">
+                <h2>Huidige Frequentie</h2>
+                <div class="frequency-value" id="current-frequency">88.5 MHz</div>
+                <div class="boat-info" id="nearest-boat">
+                    <span class="status-indicator status-offline"></span>
+                    Boot: Laden...
+                </div>
+                <div id="signal-strength">
+                    <small>Signaalsterkte: <span id="signal-value">-</span></small>
+                </div>
+            </div>
+            
+            <div id="map-container">
+                <div id="map"></div>
+            </div>
+        </main>
+        
+        <div id="controls">
+            <button id="find-location">📍 Mijn Locatie</button>
+            <button id="refresh-boats">🔄 Ververs Boten</button>
+            <button id="auto-tune">🎵 Auto-Tune</button>
+        </div>
+        
+        <div id="boat-list" style="margin-top: 20px;">
+            <h3 style="color: white; text-align: center;">Actieve Boten</h3>
+            <div id="boats-container"></div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
+
