@@ -85,9 +85,14 @@ app.use((err, req, res, next) => {
 // Initialize database and start server
 async function startServer() {
   try {
-    // Initialize database connections
+    // Initialize database connections (non-blocking)
     await database.initializeDatabase();
+  } catch (error) {
+    logger.error('❌ Database initialization failed:', error);
+    logger.warn('⚠️ Starting server without database connections');
+  }
 
+  try {
     // Start HTTP server
     app.listen(PORT, () => {
       logger.info(`🚂 PrideSync Backend running on port ${PORT}`);
@@ -97,7 +102,7 @@ async function startServer() {
     });
 
   } catch (error) {
-    logger.error('❌ Failed to start server:', error);
+    logger.error('❌ Failed to start HTTP server:', error);
     process.exit(1);
   }
 }

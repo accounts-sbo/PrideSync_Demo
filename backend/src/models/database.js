@@ -13,57 +13,70 @@ async function initializeDatabase() {
   try {
     // Initialize PostgreSQL
     if (process.env.DATABASE_URL) {
-      pgPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 2000,
-      });
+      try {
+        pgPool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+          max: 20,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 2000,
+        });
 
-      // Test PostgreSQL connection
-      const client = await pgPool.connect();
-      await client.query('SELECT NOW()');
-      client.release();
-      
-      logger.info('✅ PostgreSQL connected successfully');
-      
-      // Create tables if they don't exist
-      await createTables();
+        // Test PostgreSQL connection
+        const client = await pgPool.connect();
+        await client.query('SELECT NOW()');
+        client.release();
+
+        logger.info('✅ PostgreSQL connected successfully');
+
+        // Create tables if they don't exist
+        await createTables();
+      } catch (pgError) {
+        logger.error('❌ PostgreSQL connection failed:', pgError.message);
+        logger.warn('⚠️ Continuing without PostgreSQL - using in-memory storage');
+        pgPool = null;
+      }
     } else {
       logger.warn('⚠️ No DATABASE_URL provided, using in-memory storage');
     }
 
     // Initialize Redis
     if (process.env.REDIS_URL) {
-      redisClient = redis.createClient({
-        url: process.env.REDIS_URL,
-        retry_strategy: (options) => {
-          if (options.error && options.error.code === 'ECONNREFUSED') {
-            logger.error('Redis server connection refused');
-            return new Error('Redis server connection refused');
+      try {
+        redisClient = redis.createClient({
+          url: process.env.REDIS_URL,
+          retry_strategy: (options) => {
+            if (options.error && options.error.code === 'ECONNREFUSED') {
+              logger.error('Redis server connection refused');
+              return new Error('Redis server connection refused');
+            }
+            if (options.total_retry_time > 1000 * 60 * 60) {
+              logger.error('Redis retry time exhausted');
+              return new Error('Retry time exhausted');
+            }
+            if (options.attempt > 10) {
+              logger.error('Redis max retry attempts reached');
+              return undefined;
+            }
+            return Math.min(options.attempt * 100, 3000);
           }
-          if (options.total_retry_time > 1000 * 60 * 60) {
-            logger.error('Redis retry time exhausted');
-            return new Error('Retry time exhausted');
-          }
-          if (options.attempt > 10) {
-            logger.error('Redis max retry attempts reached');
-            return undefined;
-          }
-          return Math.min(options.attempt * 100, 3000);
-        }
-      });
+        });
 
-      await redisClient.connect();
-      logger.info('✅ Redis connected successfully');
+        await redisClient.connect();
+        logger.info('✅ Redis connected successfully');
+      } catch (redisError) {
+        logger.error('❌ Redis connection failed:', redisError.message);
+        logger.warn('⚠️ Continuing without Redis - using in-memory caching');
+        redisClient = null;
+      }
     } else {
       logger.warn('⚠️ No REDIS_URL provided, using in-memory caching');
     }
 
   } catch (error) {
     logger.error('❌ Database initialization failed:', error);
-    throw error;
+    logger.warn('⚠️ Continuing without database connections - some features may be limited');
+    // Don't throw error - allow app to start without database
   }
 }
 
