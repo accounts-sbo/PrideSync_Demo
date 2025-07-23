@@ -93,12 +93,12 @@ async function startServer() {
   }
 
   try {
-    // Start HTTP server
-    app.listen(PORT, () => {
+    // Start HTTP server (listen on all interfaces for Railway)
+    app.listen(PORT, '0.0.0.0', () => {
       logger.info(`🚂 PrideSync Backend running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`🔗 Health check: http://localhost:${PORT}/health`);
-      logger.info(`📡 Webhook endpoint: http://localhost:${PORT}/api/webhooks/kpn-gps`);
+      logger.info(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+      logger.info(`📡 Webhook endpoint: http://0.0.0.0:${PORT}/api/webhooks/kpn-gps`);
     });
 
   } catch (error) {
