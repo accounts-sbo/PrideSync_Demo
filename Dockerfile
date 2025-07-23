@@ -23,5 +23,8 @@ ENV PORT=3000
 # Expose port
 EXPOSE 3000
 
+# Set working directory to backend for runtime
+WORKDIR /app/backend
+
 # Start the app
-CMD ["node", "backend/src/app.js"]
+CMD ["node", "src/app.js"]
