@@ -1,4 +1,6 @@
 const winston = require('winston');
+const path = require('path');
+const fs = require('fs');
 
 // Create logger instance
 const logger = winston.createLogger({
@@ -47,8 +49,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Create logs directory if it doesn't exist
-const fs = require('fs');
-const path = require('path');
 const logsDir = path.join(__dirname, '../../logs');
 
 if (!fs.existsSync(logsDir)) {
