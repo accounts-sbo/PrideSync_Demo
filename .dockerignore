@@ -1,16 +1,16 @@
 # Node modules
 node_modules/
-server/node_modules/
+backend/node_modules/
 webapp/node_modules/
 
 # Logs
 logs/
-server/logs/
+backend/logs/
 *.log
 
 # Database files
-server/data/*.db
-server/data/*.db-*
+backend/data/*.db
+backend/data/*.db-*
 
 # Environment files
 .env
@@ -46,7 +46,7 @@ dist/
 build/
 
 # Test files
-server/test/
+backend/test/
 test/
 
 # Documentation (not needed in production)

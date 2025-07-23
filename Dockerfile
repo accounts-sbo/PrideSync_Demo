@@ -6,9 +6,11 @@ WORKDIR /app
 COPY backend/package*.json ./backend/
 
 # Install backend dependencies
-RUN cd backend && npm ci --only=production
+WORKDIR /app/backend
+RUN npm ci --only=production
 
-# Copy backend code
+# Go back to app directory and copy backend code
+WORKDIR /app
 COPY backend ./backend/
 
 # Create logs directory
