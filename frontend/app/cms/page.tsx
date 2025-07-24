@@ -21,12 +21,6 @@ export default function CMSPage() {
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-  useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
-  }, [fetchStats]);
-
   const fetchStats = useCallback(async () => {
     try {
       setError(null);
@@ -38,6 +32,12 @@ export default function CMSPage() {
       setError(err instanceof Error ? err.message : 'An error occurred');
     }
   }, [API_URL]);
+
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, [fetchStats]);
 
   return (
     <div className="min-h-screen bg-gray-50">
