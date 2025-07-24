@@ -9,6 +9,7 @@ const database = require('./models/database');
 const webhookRoutes = require('./routes/webhooks');
 const boatRoutes = require('./routes/boats');
 const paradeRoutes = require('./routes/parade');
+const cmsRoutes = require('./routes/cms');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,6 +61,7 @@ app.get('/health', (req, res) => {
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/boats', boatRoutes);
 app.use('/api/parade', paradeRoutes);
+app.use('/api/cms', cmsRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

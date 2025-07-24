@@ -84,21 +84,28 @@ async function initializeDatabase() {
  * Create database tables
  */
 async function createTables() {
+  // Boats table with IMEI tracking
   const createBoatsTable = `
     CREATE TABLE IF NOT EXISTS boats (
       id SERIAL PRIMARY KEY,
       boat_number INTEGER UNIQUE NOT NULL,
       name VARCHAR(255) NOT NULL,
+      imei VARCHAR(20) UNIQUE,
+      description TEXT,
+      captain_name VARCHAR(255),
+      captain_phone VARCHAR(20),
       status VARCHAR(50) DEFAULT 'waiting',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `;
 
+  // Enhanced positions table with IMEI and additional tracking
   const createPositionsTable = `
     CREATE TABLE IF NOT EXISTS boat_positions (
       id SERIAL PRIMARY KEY,
       boat_number INTEGER NOT NULL,
+      imei VARCHAR(20),
       latitude DECIMAL(10, 8) NOT NULL,
       longitude DECIMAL(11, 8) NOT NULL,
       route_distance INTEGER DEFAULT 0,
@@ -106,7 +113,10 @@ async function createTables() {
       speed DECIMAL(5, 2) DEFAULT 0,
       heading INTEGER DEFAULT 0,
       distance_from_route DECIMAL(6, 2) DEFAULT 0,
+      altitude DECIMAL(8, 2),
+      accuracy DECIMAL(6, 2),
       timestamp TIMESTAMP NOT NULL,
+      received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
     );
@@ -157,14 +167,15 @@ async function saveBoatPosition(boatNumber, positionData) {
 
   const query = `
     INSERT INTO boat_positions (
-      boat_number, latitude, longitude, route_distance, route_progress,
-      speed, heading, distance_from_route, timestamp
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      boat_number, imei, latitude, longitude, route_distance, route_progress,
+      speed, heading, distance_from_route, altitude, accuracy, timestamp
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     RETURNING id;
   `;
 
   const values = [
     boatNumber,
+    positionData.imei || null,
     positionData.latitude,
     positionData.longitude,
     positionData.routeDistance || 0,
@@ -172,12 +183,17 @@ async function saveBoatPosition(boatNumber, positionData) {
     positionData.speed || 0,
     positionData.heading || 0,
     positionData.distanceFromRoute || 0,
+    positionData.altitude || null,
+    positionData.accuracy || null,
     positionData.timestamp
   ];
 
   try {
     const result = await pgPool.query(query, values);
-    logger.debug(`Position saved for boat ${boatNumber}`, { id: result.rows[0].id });
+    logger.debug(`Position saved for boat ${boatNumber}`, {
+      id: result.rows[0].id,
+      imei: positionData.imei
+    });
     return result.rows[0].id;
   } catch (error) {
     logger.error(`Error saving position for boat ${boatNumber}:`, error);
@@ -292,6 +308,153 @@ async function cacheDel(key) {
 }
 
 /**
+ * CRUD Operations for Boats
+ */
+
+/**
+ * Create a new boat
+ */
+async function createBoat(boatData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    INSERT INTO boats (boat_number, name, imei, description, captain_name, captain_phone, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING *;
+  `;
+
+  const values = [
+    boatData.boat_number,
+    boatData.name,
+    boatData.imei || null,
+    boatData.description || null,
+    boatData.captain_name || null,
+    boatData.captain_phone || null,
+    boatData.status || 'waiting'
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Boat created: ${boatData.name}`, { boat_number: boatData.boat_number });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error creating boat:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all boats
+ */
+async function getAllBoats() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = 'SELECT * FROM boats ORDER BY boat_number ASC';
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching boats:', error);
+    return [];
+  }
+}
+
+/**
+ * Get boat by number or IMEI
+ */
+async function getBoat(identifier) {
+  if (!pgPool) {
+    return null;
+  }
+
+  const query = `
+    SELECT * FROM boats
+    WHERE boat_number = $1 OR imei = $1
+    LIMIT 1;
+  `;
+
+  try {
+    const result = await pgPool.query(query, [identifier]);
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('Error fetching boat:', error);
+    return null;
+  }
+}
+
+/**
+ * Update boat
+ */
+async function updateBoat(boatNumber, updateData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const fields = [];
+  const values = [];
+  let paramCount = 1;
+
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] !== undefined) {
+      fields.push(`${key} = $${paramCount}`);
+      values.push(updateData[key]);
+      paramCount++;
+    }
+  });
+
+  if (fields.length === 0) {
+    throw new Error('No fields to update');
+  }
+
+  fields.push(`updated_at = CURRENT_TIMESTAMP`);
+  values.push(boatNumber);
+
+  const query = `
+    UPDATE boats
+    SET ${fields.join(', ')}
+    WHERE boat_number = $${paramCount}
+    RETURNING *;
+  `;
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Boat updated: ${boatNumber}`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error updating boat:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete boat
+ */
+async function deleteBoat(boatNumber) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = 'DELETE FROM boats WHERE boat_number = $1 RETURNING *';
+
+  try {
+    const result = await pgPool.query(query, [boatNumber]);
+    if (result.rows.length > 0) {
+      logger.info(`Boat deleted: ${boatNumber}`);
+      return result.rows[0];
+    }
+    return null;
+  } catch (error) {
+    logger.error('Error deleting boat:', error);
+    throw error;
+  }
+}
+
+/**
  * Close database connections
  */
 async function closeConnections() {
@@ -300,7 +463,7 @@ async function closeConnections() {
       await pgPool.end();
       logger.info('PostgreSQL connection closed');
     }
-    
+
     if (redisClient) {
       await redisClient.quit();
       logger.info('Redis connection closed');
@@ -323,6 +486,13 @@ module.exports = {
   cacheGet,
   cacheDel,
   closeConnections,
+  // Boat CRUD operations
+  createBoat,
+  getAllBoats,
+  getBoat,
+  updateBoat,
+  deleteBoat,
+  // Database connections
   pgPool: () => pgPool,
   redisClient: () => redisClient
 };

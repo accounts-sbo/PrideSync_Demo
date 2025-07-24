@@ -89,9 +89,18 @@ export default function Home() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <header className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600 mb-2">
-            🏳️‍🌈 PrideSync
-          </h1>
+          <div className="flex justify-between items-center mb-4">
+            <div></div>
+            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600">
+              🏳️‍🌈 PrideSync
+            </h1>
+            <a
+              href="/cms"
+              className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
+            >
+              CMS
+            </a>
+          </div>
           <p className="text-lg text-gray-600">
             Real-time Pride Parade Coordination System
           </p>

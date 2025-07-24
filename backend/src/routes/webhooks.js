@@ -3,16 +3,22 @@ const Joi = require('joi');
 const logger = require('../services/logger');
 const routeMapper = require('../services/routeMapper');
 const boatState = require('../services/boatState');
+const database = require('../models/database');
 
 const router = express.Router();
 
-// Validation schema for KPN GPS webhook
+// Enhanced validation schema for KPN GPS webhook
 const gpsPayloadSchema = Joi.object({
-  bootnummer: Joi.number().integer().min(1).max(999).required(),
+  bootnummer: Joi.number().integer().min(1).max(999).optional(),
+  imei: Joi.string().length(15).pattern(/^\d+$/).optional(),
   timestamp: Joi.string().isoDate().required(),
   latitude: Joi.number().min(-90).max(90).required(),
-  longitude: Joi.number().min(-180).max(180).required()
-});
+  longitude: Joi.number().min(-180).max(180).required(),
+  altitude: Joi.number().optional(),
+  accuracy: Joi.number().min(0).optional(),
+  speed: Joi.number().min(0).optional(),
+  heading: Joi.number().min(0).max(360).optional()
+}).or('bootnummer', 'imei'); // At least one of bootnummer or imei is required
 
 /**
  * KPN GPS Webhook Endpoint
@@ -23,7 +29,7 @@ const gpsPayloadSchema = Joi.object({
  */
 router.post('/kpn-gps', async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     // Validate payload
     const { error, value } = gpsPayloadSchema.validate(req.body);
@@ -32,7 +38,7 @@ router.post('/kpn-gps', async (req, res) => {
         error: error.details[0].message,
         payload: req.body
       });
-      
+
       return res.status(400).json({
         error: 'Invalid payload',
         details: error.details[0].message,
@@ -40,12 +46,45 @@ router.post('/kpn-gps', async (req, res) => {
       });
     }
 
-    const { bootnummer, timestamp, latitude, longitude } = value;
-    
-    logger.info(`GPS update received for boat ${bootnummer}`, {
-      bootnummer,
+    const { bootnummer, imei, timestamp, latitude, longitude, altitude, accuracy, speed, heading } = value;
+
+    // Determine boat identifier and get boat info from database
+    let boat = null;
+    let boatIdentifier = null;
+
+    if (bootnummer) {
+      boat = await database.getBoat(bootnummer);
+      boatIdentifier = bootnummer;
+    } else if (imei) {
+      boat = await database.getBoat(imei);
+      boatIdentifier = imei;
+    }
+
+    if (!boat) {
+      logger.warn('GPS data received for unknown boat:', {
+        bootnummer,
+        imei,
+        coordinates: [latitude, longitude]
+      });
+
+      return res.status(404).json({
+        error: 'Boat not found',
+        message: 'No boat registered with this number or IMEI',
+        bootnummer,
+        imei,
+        coordinates: [latitude, longitude]
+      });
+    }
+
+    const actualBoatNumber = boat.boat_number;
+
+    logger.info(`GPS update received for boat ${actualBoatNumber}`, {
+      bootnummer: actualBoatNumber,
+      imei: boat.imei,
       timestamp,
-      coordinates: [latitude, longitude]
+      coordinates: [latitude, longitude],
+      accuracy,
+      speed: speed || 'unknown'
     });
 
     // Map GPS coordinates to parade route
@@ -56,36 +95,55 @@ router.post('/kpn-gps', async (req, res) => {
     });
 
     if (!routePosition) {
-      logger.warn(`Could not map GPS position to route for boat ${bootnummer}`, {
-        bootnummer,
+      logger.warn(`Could not map GPS position to route for boat ${actualBoatNumber}`, {
+        bootnummer: actualBoatNumber,
+        imei: boat.imei,
         coordinates: [latitude, longitude]
       });
-      
+
       return res.status(422).json({
         error: 'GPS position could not be mapped to parade route',
-        bootnummer,
+        bootnummer: actualBoatNumber,
+        imei: boat.imei,
         coordinates: [latitude, longitude]
       });
     }
 
-    // Update boat state with new position
-    const updatedBoat = await boatState.updateBoatPosition(bootnummer, {
+    // Prepare position data
+    const positionData = {
       latitude,
       longitude,
       timestamp: new Date(timestamp),
       routeDistance: routePosition.distanceMeters,
       routeProgress: routePosition.progressPercent,
-      speed: routePosition.estimatedSpeed,
-      heading: routePosition.heading
-    });
+      speed: speed || routePosition.estimatedSpeed,
+      heading: heading || routePosition.heading,
+      altitude: altitude || null,
+      accuracy: accuracy || null
+    };
+
+    // Save to database
+    try {
+      await database.saveBoatPosition(actualBoatNumber, {
+        ...positionData,
+        imei: boat.imei
+      });
+    } catch (dbError) {
+      logger.error('Failed to save position to database:', dbError);
+      // Continue processing even if database save fails
+    }
+
+    // Update in-memory boat state
+    const updatedBoat = await boatState.updateBoatPosition(actualBoatNumber, positionData);
 
     // Trigger corridor algorithm and status updates
-    await updateBoatState(bootnummer, updatedBoat);
+    await updateBoatState(actualBoatNumber, updatedBoat);
 
     const processingTime = Date.now() - startTime;
-    
-    logger.info(`GPS update processed successfully for boat ${bootnummer}`, {
-      bootnummer,
+
+    logger.info(`GPS update processed successfully for boat ${actualBoatNumber}`, {
+      bootnummer: actualBoatNumber,
+      imei: boat.imei,
       routeProgress: routePosition.progressPercent,
       processingTimeMs: processingTime
     });
@@ -93,7 +151,8 @@ router.post('/kpn-gps', async (req, res) => {
     // Return success response with debug info
     res.status(200).json({
       success: true,
-      bootnummer,
+      bootnummer: actualBoatNumber,
+      imei: boat.imei,
       processed: {
         timestamp: new Date().toISOString(),
         routeProgress: `${routePosition.progressPercent.toFixed(2)}%`,
