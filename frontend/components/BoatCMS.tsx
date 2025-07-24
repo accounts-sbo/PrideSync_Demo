@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface Boat {
   id: number;
@@ -37,9 +37,9 @@ export default function BoatCMS({ apiUrl }: BoatCMSProps) {
 
   useEffect(() => {
     fetchBoats();
-  }, []);
+  }, [fetchBoats]);
 
-  const fetchBoats = async () => {
+  const fetchBoats = useCallback(async () => {
     try {
       setError(null);
       const response = await fetch(`${apiUrl}/api/cms/boats`);
@@ -51,7 +51,7 @@ export default function BoatCMS({ apiUrl }: BoatCMSProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

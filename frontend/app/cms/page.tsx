@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import BoatCMS from '../../components/BoatCMS';
 
 interface CMSStats {
@@ -25,9 +25,9 @@ export default function CMSPage() {
     fetchStats();
     const interval = setInterval(fetchStats, 30000); // Refresh every 30 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchStats]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       setError(null);
       const response = await fetch(`${API_URL}/api/cms/stats`);
@@ -36,10 +36,8 @@ export default function CMSPage() {
       setStats(data.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
     }
-  };
+  }, [API_URL]);
 
   return (
     <div className="min-h-screen bg-gray-50">

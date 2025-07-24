@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import ApiTester from '../components/ApiTester';
 
 interface BoatPosition {
@@ -38,12 +38,12 @@ export default function Home() {
     fetchData();
     const interval = setInterval(fetchData, 5000); // Refresh every 5 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setError(null);
-      
+
       // Fetch boats data
       const boatsResponse = await fetch(`${API_URL}/api/boats`);
       if (!boatsResponse.ok) throw new Error('Failed to fetch boats data');
@@ -61,7 +61,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [API_URL]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
