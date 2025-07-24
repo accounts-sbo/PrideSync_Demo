@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "https://pridesyncDemo-production.up.railway.app"
+  },
+  "rewrites": [
+    {
+      "source": "/2025/:path*",
+      "destination": "/viewer/:path*"
+    }
+  ]
+}
