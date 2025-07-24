@@ -1,192 +1,178 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import ApiTester from '../components/ApiTester';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
-interface BoatPosition {
-  id: number;
-  name: string;
-  status: string;
-  position: {
-    latitude: number;
-    longitude: number;
-    routeProgress: number;
-    routeDistance: number;
-    speed: number;
-    heading: number;
-    timestamp: string;
-  };
-}
-
-interface ParadeStatus {
-  status: string;
-  startTime: string | null;
-  totalBoats: number;
-  activeBoats: number;
-  averageProgress: number;
-}
-
-export default function Home() {
-  const [boats, setBoats] = useState<BoatPosition[]>([]);
-  const [paradeStatus, setParadeStatus] = useState<ParadeStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+export default function HomePage() {
+  const [currentTime, setCurrentTime] = useState<string>('');
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5 seconds
+    const updateTime = () => {
+      setCurrentTime(new Date().toLocaleString('nl-NL'));
+    };
+    
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    
     return () => clearInterval(interval);
-  }, [fetchData]);
-
-  const fetchData = useCallback(async () => {
-    try {
-      setError(null);
-
-      // Fetch boats data
-      const boatsResponse = await fetch(`${API_URL}/api/boats`);
-      if (!boatsResponse.ok) throw new Error('Failed to fetch boats data');
-      const boatsData = await boatsResponse.json();
-      setBoats(boatsData.boats || []);
-
-      // Fetch parade status
-      const paradeResponse = await fetch(`${API_URL}/api/parade/status`);
-      if (!paradeResponse.ok) throw new Error('Failed to fetch parade status');
-      const paradeData = await paradeResponse.json();
-      setParadeStatus(paradeData.parade || null);
-
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  }, [API_URL]);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'text-green-600';
-      case 'waiting': return 'text-yellow-600';
-      case 'finished': return 'text-blue-600';
-      case 'emergency': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-pink-600 mx-auto"></div>
-          <p className="mt-4 text-lg text-gray-600">Loading PrideSync...</p>
-        </div>
-      </div>
-    );
-  }
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-100 to-purple-100">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <header className="text-center mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <div></div>
-            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-600 to-purple-600">
-              🏳️‍🌈 PrideSync
-            </h1>
-            <a
-              href="/cms"
-              className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-            >
-              CMS
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50">
+      {/* Header */}
+      <header className="pride-gradient text-white py-6">
+        <div className="container mx-auto px-4">
+          <h1 className="text-4xl md:text-6xl font-bold text-center">
+            🏳️‍🌈 PrideSync
+          </h1>
+          <p className="text-xl md:text-2xl text-center mt-2 opacity-90">
+            Pride Parade Coordination System
+          </p>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="container mx-auto px-4 py-12">
+        <div className="max-w-4xl mx-auto">
+          {/* Welcome Section */}
+          <section className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-800 mb-6">
+              Welkom bij PrideSync Nederland
+            </h2>
+            <p className="text-lg text-gray-600 mb-8 max-w-2xl mx-auto">
+              Het real-time coördinatiesysteem voor Pride parades in Nederland. 
+              Samen zorgen we voor een veilige, georganiseerde en prachtige parade ervaring.
+            </p>
+            <div className="text-sm text-gray-500">
+              Huidige tijd: {currentTime}
+            </div>
+          </section>
+
+          {/* Quick Access Cards */}
+          <section className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
+            {/* Viewer App */}
+            <Link href="/2025" className="group">
+              <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-pink-500">
+                <div className="text-4xl mb-4">👥</div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  Kijkers App 2025
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Stem op je favoriete boot en krijg meer informatie over de parade
+                </p>
+                <div className="text-pink-600 font-semibold group-hover:text-pink-700">
+                  Ga naar app →
+                </div>
+              </div>
+            </Link>
+
+            {/* Skipper App */}
+            <Link href="/skipper" className="group">
+              <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-blue-500">
+                <div className="text-4xl mb-4">⚓</div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  Schippers App
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Real-time positie-indicatie en corridor management voor schippers
+                </p>
+                <div className="text-blue-600 font-semibold group-hover:text-blue-700">
+                  Ga naar app →
+                </div>
+              </div>
+            </Link>
+
+            {/* Control Dashboard */}
+            <a href="https://pridesync-frontend-1gwklbmws-something-breaks-outs-projects.vercel.app" 
+               target="_blank" 
+               rel="noopener noreferrer" 
+               className="group">
+              <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-purple-500">
+                <div className="text-4xl mb-4">🎛️</div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  Control Dashboard
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Live monitoring en controle van de gehele parade
+                </p>
+                <div className="text-purple-600 font-semibold group-hover:text-purple-700">
+                  Open dashboard →
+                </div>
+              </div>
+            </a>
+          </section>
+
+          {/* Features Section */}
+          <section className="bg-white rounded-xl shadow-lg p-8 mb-16">
+            <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+              Systeem Functies
+            </h3>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="flex items-start space-x-3">
+                <div className="text-2xl">📍</div>
+                <div>
+                  <h4 className="font-semibold text-gray-800">Real-time GPS Tracking</h4>
+                  <p className="text-gray-600">Live positie van alle boten in de parade</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3">
+                <div className="text-2xl">🎯</div>
+                <div>
+                  <h4 className="font-semibold text-gray-800">Corridor Management</h4>
+                  <p className="text-gray-600">Automatische afstand en positie controle</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3">
+                <div className="text-2xl">📱</div>
+                <div>
+                  <h4 className="font-semibold text-gray-800">Mobile Apps</h4>
+                  <p className="text-gray-600">Dedicated apps voor schippers en kijkers</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3">
+                <div className="text-2xl">🚨</div>
+                <div>
+                  <h4 className="font-semibold text-gray-800">Emergency Management</h4>
+                  <p className="text-gray-600">Directe communicatie bij calamiteiten</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Status Section */}
+          <section className="text-center">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+              <div className="text-green-600 text-2xl mb-2">✅</div>
+              <h3 className="text-lg font-semibold text-green-800 mb-2">
+                Systeem Status: Operationeel
+              </h3>
+              <p className="text-green-700">
+                Alle systemen zijn online en gereed voor gebruik
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="bg-gray-800 text-white py-8 mt-16">
+        <div className="container mx-auto px-4 text-center">
+          <p className="text-gray-300">
+            © 2025 PrideSync Nederland - Samen maken we Pride mogelijk
+          </p>
+          <div className="mt-4 space-x-6">
+            <a href="mailto:info@pridesync.nl" className="text-gray-300 hover:text-white">
+              Contact
+            </a>
+            <a href="/privacy" className="text-gray-300 hover:text-white">
+              Privacy
+            </a>
+            <a href="/support" className="text-gray-300 hover:text-white">
+              Support
             </a>
           </div>
-          <p className="text-lg text-gray-600">
-            Real-time Pride Parade Coordination System
-          </p>
-        </header>
-
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-
-        {/* Parade Status */}
-        {paradeStatus && (
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <h2 className="text-2xl font-semibold mb-4 text-gray-800">Parade Status</h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className={`text-2xl font-bold ${getStatusColor(paradeStatus.status)}`}>
-                  {paradeStatus.status.toUpperCase()}
-                </div>
-                <div className="text-sm text-gray-500">Status</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">{paradeStatus.totalBoats}</div>
-                <div className="text-sm text-gray-500">Total Boats</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">{paradeStatus.activeBoats}</div>
-                <div className="text-sm text-gray-500">Active Boats</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">
-                  {paradeStatus.averageProgress.toFixed(1)}%
-                </div>
-                <div className="text-sm text-gray-500">Avg Progress</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Boats Grid */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-800">Boat Positions</h2>
-          {boats.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">No boats currently tracked</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {boats.map((boat) => (
-                <div key={boat.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg">{boat.name}</h3>
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(boat.status)}`}>
-                      {boat.status}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-sm text-gray-600">
-                    <div>Progress: {boat.position.routeProgress.toFixed(1)}%</div>
-                    <div>Speed: {boat.position.speed.toFixed(1)} km/h</div>
-                    <div>Heading: {boat.position.heading}°</div>
-                    <div>
-                      Position: {boat.position.latitude.toFixed(4)}, {boat.position.longitude.toFixed(4)}
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      Updated: {new Date(boat.position.timestamp).toLocaleTimeString()}
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-gradient-to-r from-pink-500 to-purple-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(boat.position.routeProgress, 100)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-
-        {/* API Tester */}
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-800">API Tester</h2>
-          <ApiTester apiUrl={API_URL} />
-        </div>
-      </div>
+      </footer>
     </div>
   );
 }
