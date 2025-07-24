@@ -17,7 +17,6 @@ interface CMSStats {
 
 export default function CMSPage() {
   const [stats, setStats] = useState<CMSStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -37,8 +36,8 @@ export default function CMSPage() {
       setStats(data.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     }
   };
 
