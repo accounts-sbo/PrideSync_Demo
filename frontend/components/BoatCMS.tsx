@@ -35,10 +35,6 @@ export default function BoatCMS({ apiUrl }: BoatCMSProps) {
     status: 'waiting'
   });
 
-  useEffect(() => {
-    fetchBoats();
-  }, [fetchBoats]);
-
   const fetchBoats = useCallback(async () => {
     try {
       setError(null);
@@ -52,6 +48,10 @@ export default function BoatCMS({ apiUrl }: BoatCMSProps) {
       setLoading(false);
     }
   }, [apiUrl]);
+
+  useEffect(() => {
+    fetchBoats();
+  }, [fetchBoats]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
