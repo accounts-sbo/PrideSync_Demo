@@ -149,11 +149,16 @@ curl https://pridesync-backend-production.up.railway.app/api/boats
 ```
 
 ### **2. Test Vercel Frontend**
-1. Open `https://pridesync-frontend.vercel.app`
-2. Navigate to "API Tester" tab
-3. Click "Test Health Endpoint"
-4. Click "Test GPS Webhook"
-5. Verify data appears in "Boat Tracker" tab
+1. **Landing Page**: `https://pridesync-frontend.vercel.app`
+2. **Admin Dashboard**: `https://pridesync-frontend.vercel.app/admin`
+   - Check system status indicators
+   - Test API health check links
+   - Verify device management CMS link
+3. **Voting App**: `https://pridesync-frontend.vercel.app/2025`
+   - Test boat voting functionality
+   - Check leaderboard updates
+4. **Device CMS**: `https://your-railway-app.railway.app/api/device-management/cms`
+   - Add IMEI → Boat mappings
 
 ### **3. Test Integration**
 ```bash

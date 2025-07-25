@@ -7,6 +7,8 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "jest",
+    "build": "echo 'No build step required for Node.js'",
+    "postinstall": "echo 'Installation complete'",
     "import-boats": "node scripts/import-boats.js",
     "simulate-gps": "node scripts/gps-simulator.js",
     "setup-demo": "npm run import-boats && echo 'Demo setup complete! Run npm run simulate-gps to start GPS simulation.'"
