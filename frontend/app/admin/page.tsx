@@ -38,8 +38,8 @@ export default function AdminDashboard() {
   const checkSystemStatus = async () => {
     // Check backend health
     try {
-      const backendUrl = process.env.NODE_ENV === 'production' 
-        ? 'https://pridesync-demo-production.up.railway.app'
+      const backendUrl = process.env.NODE_ENV === 'production'
+        ? 'https://pridesyncdemo-production.up.railway.app'
         : 'http://localhost:3001';
         
       const response = await fetch(`${backendUrl}/health`);
@@ -79,8 +79,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const backendUrl = process.env.NODE_ENV === 'production' 
-    ? 'https://pridesync-demo-production.up.railway.app'
+  const backendUrl = process.env.NODE_ENV === 'production'
+    ? 'https://pridesyncdemo-production.up.railway.app'
     : 'http://localhost:3001';
 
   return (
