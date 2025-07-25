@@ -82,24 +82,21 @@ export default function HomePage() {
               </div>
             </Link>
 
-            {/* Control Dashboard */}
-            <a href="https://pridesync-frontend-1gwklbmws-something-breaks-outs-projects.vercel.app" 
-               target="_blank" 
-               rel="noopener noreferrer" 
-               className="group">
+            {/* Admin Dashboard */}
+            <Link href="/admin" className="group">
               <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-purple-500">
                 <div className="text-4xl mb-4">🎛️</div>
                 <h3 className="text-xl font-bold text-gray-800 mb-2">
-                  Control Dashboard
+                  Admin Dashboard
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  Live monitoring en controle van de gehele parade
+                  System management, device configuration en API monitoring
                 </p>
                 <div className="text-purple-600 font-semibold group-hover:text-purple-700">
                   Open dashboard →
                 </div>
               </div>
-            </a>
+            </Link>
           </section>
 
           {/* Features Section */}

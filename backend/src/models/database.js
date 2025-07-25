@@ -84,19 +84,55 @@ async function initializeDatabase() {
  * Create database tables
  */
 async function createTables() {
-  // Boats table with IMEI tracking
+  // Boats table with extended fields for Pride data
   const createBoatsTable = `
     CREATE TABLE IF NOT EXISTS boats (
       id SERIAL PRIMARY KEY,
       boat_number INTEGER UNIQUE NOT NULL,
       name VARCHAR(255) NOT NULL,
-      imei VARCHAR(20) UNIQUE,
+      imei VARCHAR(20),
       description TEXT,
       captain_name VARCHAR(255),
       captain_phone VARCHAR(20),
       status VARCHAR(50) DEFAULT 'waiting',
+      organisation VARCHAR(255),
+      theme TEXT,
+      mac_address VARCHAR(17),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+
+  // Device mappings table for linking tracker devices to boats
+  const createDeviceMappingsTable = `
+    CREATE TABLE IF NOT EXISTS device_mappings (
+      id SERIAL PRIMARY KEY,
+      boat_id INTEGER,
+      boat_number INTEGER,
+      device_imei VARCHAR(20) UNIQUE,
+      device_serial VARCHAR(50),
+      mac_address VARCHAR(17),
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE,
+      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
+    );
+  `;
+
+  // Votes table for the 2025 voting app
+  const createVotesTable = `
+    CREATE TABLE IF NOT EXISTS votes (
+      id SERIAL PRIMARY KEY,
+      boat_id INTEGER,
+      boat_number INTEGER,
+      vote_type VARCHAR(10) CHECK(vote_type IN ('heart', 'star')),
+      user_session VARCHAR(255),
+      ip_address INET,
+      user_agent TEXT,
+      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE,
+      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
     );
   `;
 
@@ -145,10 +181,12 @@ async function createTables() {
 
   try {
     await pgPool.query(createBoatsTable);
+    await pgPool.query(createDeviceMappingsTable);
+    await pgPool.query(createVotesTable);
     await pgPool.query(createPositionsTable);
     await pgPool.query(createIncidentsTable);
     await pgPool.query(createIndexes);
-    
+
     logger.info('✅ Database tables created/verified successfully');
   } catch (error) {
     logger.error('❌ Error creating database tables:', error);
@@ -455,6 +493,138 @@ async function deleteBoat(boatNumber) {
 }
 
 /**
+ * Device Mapping Functions
+ */
+
+/**
+ * Create device mapping
+ */
+async function createDeviceMapping(mappingData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    INSERT INTO device_mappings (boat_id, boat_number, device_imei, device_serial, mac_address, is_active)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *;
+  `;
+
+  const values = [
+    mappingData.boat_id || null,
+    mappingData.boat_number,
+    mappingData.device_imei,
+    mappingData.device_serial || null,
+    mappingData.mac_address || null,
+    mappingData.is_active !== undefined ? mappingData.is_active : true
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Device mapping created for boat ${mappingData.boat_number}`, {
+      imei: mappingData.device_imei
+    });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error creating device mapping:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get device mapping by IMEI
+ */
+async function getDeviceMappingByIMEI(imei) {
+  if (!pgPool) {
+    return null;
+  }
+
+  const query = `
+    SELECT dm.*, b.name as boat_name, b.organisation, b.theme
+    FROM device_mappings dm
+    LEFT JOIN boats b ON dm.boat_number = b.boat_number
+    WHERE dm.device_imei = $1 AND dm.is_active = true
+    LIMIT 1;
+  `;
+
+  try {
+    const result = await pgPool.query(query, [imei]);
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('Error fetching device mapping:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all device mappings
+ */
+async function getAllDeviceMappings() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT dm.*, b.name as boat_name, b.organisation, b.theme
+    FROM device_mappings dm
+    LEFT JOIN boats b ON dm.boat_number = b.boat_number
+    ORDER BY dm.boat_number ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching device mappings:', error);
+    return [];
+  }
+}
+
+/**
+ * Update device mapping
+ */
+async function updateDeviceMapping(id, updateData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const fields = [];
+  const values = [];
+  let paramCount = 1;
+
+  Object.keys(updateData).forEach(key => {
+    if (updateData[key] !== undefined) {
+      fields.push(`${key} = $${paramCount}`);
+      values.push(updateData[key]);
+      paramCount++;
+    }
+  });
+
+  if (fields.length === 0) {
+    throw new Error('No fields to update');
+  }
+
+  fields.push(`updated_at = CURRENT_TIMESTAMP`);
+  values.push(id);
+
+  const query = `
+    UPDATE device_mappings
+    SET ${fields.join(', ')}
+    WHERE id = $${paramCount}
+    RETURNING *;
+  `;
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Device mapping updated: ${id}`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error updating device mapping:', error);
+    throw error;
+  }
+}
+
+/**
  * Close database connections
  */
 async function closeConnections() {
@@ -477,6 +647,154 @@ async function closeConnections() {
 process.on('SIGINT', closeConnections);
 process.on('SIGTERM', closeConnections);
 
+/**
+ * Bulk import boats from CSV data
+ */
+async function bulkImportBoats(boatsData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const client = await pgPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const insertedBoats = [];
+
+    for (const boat of boatsData) {
+      const query = `
+        INSERT INTO boats (boat_number, name, organisation, theme, mac_address)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (boat_number)
+        DO UPDATE SET
+          name = EXCLUDED.name,
+          organisation = EXCLUDED.organisation,
+          theme = EXCLUDED.theme,
+          mac_address = EXCLUDED.mac_address,
+          updated_at = CURRENT_TIMESTAMP
+        RETURNING *;
+      `;
+
+      const values = [
+        boat.boat_number,
+        boat.name,
+        boat.organisation || null,
+        boat.theme || null,
+        boat.mac_address || null
+      ];
+
+      const result = await client.query(query, values);
+      insertedBoats.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    logger.info(`Bulk imported ${insertedBoats.length} boats`);
+    return insertedBoats;
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error('Error bulk importing boats:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Voting Functions
+ */
+
+/**
+ * Record a vote
+ */
+async function recordVote(voteData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    INSERT INTO votes (boat_id, boat_number, vote_type, user_session, ip_address, user_agent)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *;
+  `;
+
+  const values = [
+    voteData.boat_id || null,
+    voteData.boat_number,
+    voteData.vote_type,
+    voteData.user_session,
+    voteData.ip_address || null,
+    voteData.user_agent || null
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.debug(`Vote recorded: ${voteData.vote_type} for boat ${voteData.boat_number}`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error recording vote:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get vote counts for all boats
+ */
+async function getVoteCounts() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT
+      b.boat_number,
+      b.name,
+      b.organisation,
+      b.theme,
+      COUNT(CASE WHEN v.vote_type = 'heart' THEN 1 END) as hearts,
+      COUNT(CASE WHEN v.vote_type = 'star' THEN 1 END) as stars,
+      COUNT(v.id) as total_votes
+    FROM boats b
+    LEFT JOIN votes v ON b.boat_number = v.boat_number
+    GROUP BY b.boat_number, b.name, b.organisation, b.theme
+    ORDER BY stars DESC, hearts DESC, b.boat_number ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching vote counts:', error);
+    return [];
+  }
+}
+
+/**
+ * Get user vote history
+ */
+async function getUserVotes(userSession) {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT boat_number, vote_type, COUNT(*) as count
+    FROM votes
+    WHERE user_session = $1
+    GROUP BY boat_number, vote_type
+    ORDER BY boat_number ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query, [userSession]);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching user votes:', error);
+    return [];
+  }
+}
+
 module.exports = {
   initializeDatabase,
   saveBoatPosition,
@@ -492,6 +810,16 @@ module.exports = {
   getBoat,
   updateBoat,
   deleteBoat,
+  bulkImportBoats,
+  // Device mapping operations
+  createDeviceMapping,
+  getDeviceMappingByIMEI,
+  getAllDeviceMappings,
+  updateDeviceMapping,
+  // Voting operations
+  recordVote,
+  getVoteCounts,
+  getUserVotes,
   // Database connections
   pgPool: () => pgPool,
   redisClient: () => redisClient

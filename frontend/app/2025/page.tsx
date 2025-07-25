@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { api } from '../../lib/api';
 
 interface Boat {
   id: number;
@@ -26,57 +27,132 @@ export default function PrideBoatBallot() {
   const [showModal, setShowModal] = useState<'leaderboard' | 'achievements' | 'help' | 'ideas' | null>(null);
   const [boats, setBoats] = useState<Boat[]>([]);
 
-  // Mock data - in productie zou dit van de API komen
+  // Load boats from API
   useEffect(() => {
-    const mockBoats: Boat[] = [
-      { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
-      { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
-      { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 },
-      { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 84, stars: 67 },
-      { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 112, stars: 78 }
-    ];
-    
-    setBoats(mockBoats);
-    setCurrentBoat(mockBoats[0]); // Start met eerste boot
+    loadBoats();
+    loadUserStats();
   }, []);
 
-  const sendHeart = () => {
-    if (!currentBoat) return;
-    
-    setBoats(boats.map(boat => 
-      boat.id === currentBoat.id 
-        ? { ...boat, hearts: boat.hearts + 1 }
-        : boat
-    ));
-    
-    setUserStats(prev => ({ 
-      ...prev, 
-      heartsGiven: prev.heartsGiven + 1 
-    }));
+  const loadBoats = async () => {
+    try {
+      const result = await api.voting.getBoats();
+
+      if (result.success && result.data.length > 0) {
+        setBoats(result.data);
+        setCurrentBoat(result.data[0]); // Start met eerste boot
+      } else {
+        // Fallback to mock data if API fails
+        const mockBoats: Boat[] = [
+          { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
+          { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
+          { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 },
+          { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 84, stars: 67 },
+          { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 112, stars: 78 }
+        ];
+        setBoats(mockBoats);
+        setCurrentBoat(mockBoats[0]);
+      }
+    } catch (error) {
+      console.error('Error loading boats:', error);
+      // Use mock data as fallback
+      const mockBoats: Boat[] = [
+        { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
+        { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
+        { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 }
+      ];
+      setBoats(mockBoats);
+      setCurrentBoat(mockBoats[0]);
+    }
   };
 
-  const sendStar = () => {
+  const loadUserStats = async () => {
+    try {
+      const userSession = getUserSession();
+      const result = await api.voting.getUserVotes(userSession);
+
+      if (result.success) {
+        setUserStats({
+          totalVotes: result.data.stars_given,
+          boatsVoted: result.data.boats_voted,
+          heartsGiven: result.data.hearts_given
+        });
+
+        // Set user votes for star limits
+        const votes: {[key: number]: number} = {};
+        Object.entries(result.data.votes_by_boat).forEach(([boatId, boatVotes]: [string, any]) => {
+          votes[parseInt(boatId)] = boatVotes.stars || 0;
+        });
+        setUserVotes(votes);
+      }
+    } catch (error) {
+      console.error('Error loading user stats:', error);
+    }
+  };
+
+  const getUserSession = () => {
+    let session = localStorage.getItem('pride_user_session');
+    if (!session) {
+      session = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('pride_user_session', session);
+    }
+    return session;
+  };
+
+  const sendHeart = async () => {
     if (!currentBoat) return;
-    
+
+    try {
+      const userSession = getUserSession();
+      await api.voting.vote(currentBoat.id, 'heart', userSession);
+
+      // Update local state optimistically
+      setBoats(boats.map(boat =>
+        boat.id === currentBoat.id
+          ? { ...boat, hearts: boat.hearts + 1 }
+          : boat
+      ));
+
+      setUserStats(prev => ({
+        ...prev,
+        heartsGiven: prev.heartsGiven + 1
+      }));
+    } catch (error) {
+      console.error('Error sending heart:', error);
+    }
+  };
+
+  const sendStar = async () => {
+    if (!currentBoat) return;
+
     const currentVotes = userVotes[currentBoat.id] || 0;
     if (currentVotes >= 5) return; // Max 5 sterren per boot
-    
-    setBoats(boats.map(boat => 
-      boat.id === currentBoat.id 
-        ? { ...boat, stars: boat.stars + 1 }
-        : boat
-    ));
-    
-    setUserVotes(prev => ({
-      ...prev,
-      [currentBoat.id]: currentVotes + 1
-    }));
-    
-    setUserStats(prev => ({ 
-      ...prev, 
-      totalVotes: prev.totalVotes + 1,
-      boatsVoted: Object.keys({...userVotes, [currentBoat.id]: currentVotes + 1}).length
-    }));
+
+    try {
+      const userSession = getUserSession();
+      await api.voting.vote(currentBoat.id, 'star', userSession);
+
+      // Update local state optimistically
+      setBoats(boats.map(boat =>
+        boat.id === currentBoat.id
+          ? { ...boat, stars: boat.stars + 1 }
+          : boat
+      ));
+
+      setUserVotes(prev => ({
+        ...prev,
+        [currentBoat.id]: currentVotes + 1
+      }));
+
+      setUserStats(prev => ({
+        ...prev,
+        totalVotes: prev.totalVotes + 1,
+        boatsVoted: Object.keys({...userVotes, [currentBoat.id]: currentVotes + 1}).length
+      }));
+    } catch (error) {
+      console.error('Error sending star:', error);
+      // Show user-friendly error message
+      alert('Er ging iets mis bij het stemmen. Probeer het opnieuw.');
+    }
   };
 
   const nextBoat = () => {
@@ -87,6 +163,60 @@ export default function PrideBoatBallot() {
   };
 
   const sortedBoats = [...boats].sort((a, b) => b.stars - a.stars);
+
+  // Idea form component
+  const IdeaForm = ({ onSubmit }: { onSubmit: (idea: string, email: string) => void }) => {
+    const [idea, setIdea] = useState('');
+    const [email, setEmail] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!idea.trim()) return;
+
+      setIsSubmitting(true);
+      try {
+        await onSubmit(idea, email);
+      } finally {
+        setIsSubmitting(false);
+        setIdea('');
+        setEmail('');
+      }
+    };
+
+    return (
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-2">Jouw idee voor WorldPride 2026</label>
+          <textarea
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+            className="w-full p-3 border border-gray-300 rounded-lg"
+            rows={4}
+            placeholder="Deel je idee voor een nog betere PrideSync ervaring..."
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-2">Email (optioneel)</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full p-3 border border-gray-300 rounded-lg"
+            placeholder="je@email.com"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={isSubmitting || !idea.trim()}
+          className="w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white py-3 rounded-lg font-semibold disabled:opacity-50"
+        >
+          {isSubmitting ? '💭 Versturen...' : '💡 Verstuur Idee'}
+        </button>
+      </form>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-400 via-purple-500 to-blue-500">
@@ -301,30 +431,18 @@ export default function PrideBoatBallot() {
               )}
 
               {showModal === 'ideas' && (
-                <form className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Jouw idee voor WorldPride 2026</label>
-                    <textarea 
-                      className="w-full p-3 border border-gray-300 rounded-lg"
-                      rows={4}
-                      placeholder="Deel je idee voor een nog betere PrideSync ervaring..."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Email (optioneel)</label>
-                    <input 
-                      type="email"
-                      className="w-full p-3 border border-gray-300 rounded-lg"
-                      placeholder="je@email.com"
-                    />
-                  </div>
-                  <button 
-                    type="submit"
-                    className="w-full bg-gradient-to-r from-pink-500 to-purple-500 text-white py-3 rounded-lg font-semibold"
-                  >
-                    💡 Verstuur Idee
-                  </button>
-                </form>
+                <IdeaForm onSubmit={async (idea, email) => {
+                  try {
+                    const userSession = getUserSession();
+                    await api.voting.submitIdea(idea, email, userSession);
+
+                    alert('Bedankt voor je idee! We nemen het mee in overweging voor WorldPride 2026.');
+                    setShowModal(null);
+                  } catch (error) {
+                    console.error('Error submitting idea:', error);
+                    alert('Er ging iets mis bij het versturen van je idee. Probeer het later opnieuw.');
+                  }
+                }} />
               )}
             </div>
           </div>

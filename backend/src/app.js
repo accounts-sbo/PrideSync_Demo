@@ -10,6 +10,8 @@ const webhookRoutes = require('./routes/webhooks');
 const boatRoutes = require('./routes/boats');
 const paradeRoutes = require('./routes/parade');
 const cmsRoutes = require('./routes/cms');
+const deviceManagementRoutes = require('./routes/device-management');
+const votingRoutes = require('./routes/voting');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -62,6 +64,8 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/boats', boatRoutes);
 app.use('/api/parade', paradeRoutes);
 app.use('/api/cms', cmsRoutes);
+app.use('/api/device-management', deviceManagementRoutes);
+app.use('/api/voting', votingRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -100,7 +104,10 @@ async function startServer() {
       logger.info(`🚂 PrideSync Backend running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       logger.info(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
-      logger.info(`📡 Webhook endpoint: http://0.0.0.0:${PORT}/api/webhooks/kpn-gps`);
+      logger.info(`📡 Webhook endpoints:`);
+      logger.info(`   - KPN GPS: http://0.0.0.0:${PORT}/api/webhooks/kpn-gps`);
+      logger.info(`   - Tracker GPS: http://0.0.0.0:${PORT}/api/webhooks/tracker-gps`);
+      logger.info(`🔧 Device Management CMS: http://0.0.0.0:${PORT}/api/device-management/cms`);
     });
 
   } catch (error) {
