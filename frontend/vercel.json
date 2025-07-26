@@ -1,14 +1,7 @@
 {
   "version": 2,
   "framework": "nextjs",
-  "buildCommand": "npm ci && npm run build",
-  "installCommand": "npm ci",
   "env": {
     "NEXT_PUBLIC_API_URL": "https://pridesyncdemo-production.up.railway.app"
-  },
-  "functions": {
-    "app/**": {
-      "runtime": "nodejs20.x"
-    }
   }
 }
