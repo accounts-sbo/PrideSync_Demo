@@ -90,13 +90,19 @@ export default function AdminDashboard() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <Link href="/" className="text-2xl font-bold text-gray-800">
+              <Link href="/admin" className="text-2xl font-bold text-gray-800">
                 🏳️‍🌈 PrideSync Admin
               </Link>
               <span className="text-sm text-gray-500">
                 {currentTime}
               </span>
             </div>
+            <nav className="flex space-x-4">
+              <Link href="/admin/cms" className="text-gray-600 hover:text-purple-600">CMS</Link>
+              <Link href="/admin/import" className="text-gray-600 hover:text-purple-600">Import</Link>
+              <Link href="/admin/dashboard" className="text-gray-600 hover:text-purple-600">Dashboard</Link>
+              <Link href="/" className="text-gray-600 hover:text-purple-600">Public Site</Link>
+            </nav>
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-600">System Status:</span>
               <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(systemStatus.backend)}`}>
@@ -199,30 +205,30 @@ export default function AdminDashboard() {
             <div>
               <h4 className="font-semibold text-gray-700 mb-2">Webhooks</h4>
               <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/webhooks/tracker-gps</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/webhooks/kpn-gps</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">POST /api/webhooks/tracker-gps</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">POST /api/webhooks/kpn-gps</code></li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold text-gray-700 mb-2">Voting</h4>
               <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/voting/boats</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/voting/vote</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/voting/leaderboard</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">GET /api/voting/boats</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">POST /api/voting/vote</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">GET /api/voting/leaderboard</code></li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold text-gray-700 mb-2">Device Management</h4>
               <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/device-management/mappings</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/device-management/mappings</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">GET /api/device-management/mappings</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">POST /api/device-management/mappings</code></li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold text-gray-700 mb-2">Boats</h4>
               <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/boats</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/parade/status</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">GET /api/boats</code></li>
+                <li><code className="bg-gray-800 text-gray-100 px-2 py-1 rounded">GET /api/parade/status</code></li>
               </ul>
             </div>
           </div>

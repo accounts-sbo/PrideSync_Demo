@@ -1,9 +1,25 @@
 const express = require('express');
 const Joi = require('joi');
+const multer = require('multer');
 const logger = require('../services/logger');
 const database = require('../models/database');
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: 'uploads/',
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  }
+});
 
 // Validation schemas
 const boatSchema = Joi.object({
@@ -288,6 +304,126 @@ router.get('/stats', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * POST /api/cms/import-boats
+ * Import boats from CSV file
+ */
+router.post('/import-boats', upload.single('csvFile'), async (req, res) => {
+  const fs = require('fs');
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No CSV file uploaded'
+      });
+    }
+
+    // Read and parse CSV file
+    const csvContent = fs.readFileSync(req.file.path, 'utf-8');
+    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+
+    if (lines.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: 'CSV file must have at least a header and one data row'
+      });
+    }
+
+    // Parse header
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+
+    // Validate required headers
+    const requiredHeaders = ['Asset Type', 'Name', 'Asset Code', 'Device Type', 'Serial Number'];
+    const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+
+    if (missingHeaders.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Missing required headers: ${missingHeaders.join(', ')}`
+      });
+    }
+
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+    const errorDetails = [];
+
+    // Process each boat
+    for (let i = 1; i < lines.length; i++) {
+      try {
+        const row = lines[i].split(',').map(cell => cell.trim().replace(/"/g, ''));
+
+        if (row.length !== headers.length) {
+          skipped++;
+          continue;
+        }
+
+        // Map row data to object
+        const data = {};
+        headers.forEach((header, index) => {
+          data[header] = row[index] || '';
+        });
+
+        // Extract boat number from Name field
+        const boatNumber = parseInt(data['Name']);
+        if (isNaN(boatNumber)) {
+          errors++;
+          errorDetails.push(`Row ${i}: Invalid boat number in Name field: ${data['Name']}`);
+          continue;
+        }
+
+        // Create boat object
+        const boatData = {
+          boat_number: boatNumber,
+          name: `Pride Boat ${boatNumber}`,
+          description: data['Description'] || `KPN Tracked Boat ${boatNumber}`,
+          status: 'waiting',
+          asset_code: data['Asset Code'],
+          asset_type: data['Asset Type'] || 'Boat',
+          device_type: data['Device Type'],
+          serial_number: data['Serial Number'],
+          enabled: data['Enabled'] === 'Enabled',
+          current_status: data['Current Status']
+        };
+
+        // Try to create boat
+        await database.createBoat(boatData);
+        imported++;
+
+      } catch (error) {
+        errors++;
+        errorDetails.push(`Row ${i}: ${error.message}`);
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      success: true,
+      message: `Import completed. Imported: ${imported}, Skipped: ${skipped}, Errors: ${errors}`,
+      imported,
+      skipped,
+      errors,
+      errorDetails: errorDetails.slice(0, 10) // Limit error details
+    });
+
+  } catch (error) {
+    // Clean up uploaded file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    logger.error('Error importing boats from CSV:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: 'Failed to import boats from CSV'
     });
   }
 });

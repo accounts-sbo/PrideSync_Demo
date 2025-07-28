@@ -90,7 +90,7 @@ async function initializeDatabase() {
  * Create database tables
  */
 async function createTables() {
-  // Boats table with extended fields for Pride data
+  // Boats table with extended fields for Pride data and KPN tracking
   const createBoatsTable = `
     CREATE TABLE IF NOT EXISTS boats (
       id SERIAL PRIMARY KEY,
@@ -104,6 +104,16 @@ async function createTables() {
       organisation VARCHAR(255),
       theme TEXT,
       mac_address VARCHAR(17),
+      -- KPN Tracking fields
+      asset_code VARCHAR(50),
+      asset_type VARCHAR(50) DEFAULT 'Boat',
+      device_type VARCHAR(100),
+      serial_number VARCHAR(50),
+      enabled BOOLEAN DEFAULT true,
+      last_connected TIMESTAMP,
+      current_status VARCHAR(100),
+      odometer_km DECIMAL(10,2),
+      run_hours DECIMAL(10,2),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
