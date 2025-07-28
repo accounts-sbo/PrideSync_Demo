@@ -21,8 +21,9 @@ app.use(helmet());
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'http://localhost:3001', 
+    'http://localhost:3001',
     'https://*.vercel.app',
+    'https://pride-sync-demo-frontend-2025.vercel.app',
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true
