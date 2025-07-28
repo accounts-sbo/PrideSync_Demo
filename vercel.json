@@ -1,26 +1,11 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/next",
-      "config": {
-        "distDir": ".next"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/frontend/$1"
-    }
-  ],
+  "framework": "nextjs",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/.next",
+  "installCommand": "cd frontend && npm install",
+  "rootDirectory": "frontend",
   "env": {
-    "NEXT_PUBLIC_API_URL": "@railway-api-url"
-  },
-  "functions": {
-    "frontend/app/**": {
-      "runtime": "nodejs18.x"
-    }
+    "NEXT_PUBLIC_API_URL": "https://pridesyncdemo-production.up.railway.app"
   }
 }

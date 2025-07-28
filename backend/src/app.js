@@ -14,7 +14,7 @@ const deviceManagementRoutes = require('./routes/device-management');
 const votingRoutes = require('./routes/voting');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // Security middleware
 app.use(helmet());
