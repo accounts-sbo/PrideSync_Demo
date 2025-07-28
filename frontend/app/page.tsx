@@ -141,7 +141,7 @@ export default function HomePage() {
             <div className="bg-green-50 border border-green-200 rounded-lg p-6">
               <div className="text-green-600 text-2xl mb-2">✅</div>
               <h3 className="text-lg font-semibold text-green-800 mb-2">
-                Systeem Status: Operationeel
+                Systeem Status: Operationeel ✨
               </h3>
               <p className="text-green-700">
                 Alle systemen zijn online en gereed voor gebruik
