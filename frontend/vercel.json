@@ -3,5 +3,10 @@
   "framework": "nextjs",
   "env": {
     "NEXT_PUBLIC_API_URL": "https://pridesyncdemo-production.up.railway.app"
+  },
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_API_URL": "https://pridesyncdemo-production.up.railway.app"
+    }
   }
 }
