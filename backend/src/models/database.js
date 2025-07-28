@@ -6,6 +6,12 @@ const logger = require('../services/logger');
 let pgPool = null;
 let redisClient = null;
 
+// In-memory storage fallback
+let inMemoryBoats = [];
+let inMemoryPositions = [];
+let inMemoryVotes = [];
+let inMemoryDeviceMappings = [];
+
 /**
  * Initialize database connections
  */
@@ -199,8 +205,31 @@ async function createTables() {
  */
 async function saveBoatPosition(boatNumber, positionData) {
   if (!pgPool) {
-    logger.debug('No database connection, skipping position save');
-    return;
+    // Save to in-memory storage
+    const position = {
+      id: inMemoryPositions.length + 1,
+      boat_number: boatNumber,
+      imei: positionData.imei || null,
+      latitude: positionData.latitude,
+      longitude: positionData.longitude,
+      route_distance: positionData.routeDistance || 0,
+      route_progress: positionData.routeProgress || 0,
+      speed: positionData.speed || 0,
+      heading: positionData.heading || 0,
+      distance_from_route: positionData.distanceFromRoute || 0,
+      altitude: positionData.altitude || null,
+      accuracy: positionData.accuracy || null,
+      timestamp: positionData.timestamp,
+      received_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+
+    inMemoryPositions.push(position);
+    logger.debug(`Position saved (in-memory) for boat ${boatNumber}`, {
+      id: position.id,
+      imei: positionData.imei
+    });
+    return position;
   }
 
   const query = `
@@ -354,7 +383,29 @@ async function cacheDel(key) {
  */
 async function createBoat(boatData) {
   if (!pgPool) {
-    throw new Error('Database not available');
+    // Use in-memory storage as fallback
+    const newBoat = {
+      id: inMemoryBoats.length + 1,
+      boat_number: boatData.boat_number,
+      name: boatData.name,
+      imei: boatData.imei || null,
+      description: boatData.description || null,
+      captain_name: boatData.captain_name || null,
+      captain_phone: boatData.captain_phone || null,
+      status: boatData.status || 'waiting',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // Check for duplicate boat numbers
+    const existingBoat = inMemoryBoats.find(b => b.boat_number === boatData.boat_number);
+    if (existingBoat) {
+      throw new Error(`Boat with number ${boatData.boat_number} already exists`);
+    }
+
+    inMemoryBoats.push(newBoat);
+    logger.info(`Boat created (in-memory): ${boatData.name}`, { boat_number: boatData.boat_number });
+    return newBoat;
   }
 
   const query = `
@@ -388,7 +439,8 @@ async function createBoat(boatData) {
  */
 async function getAllBoats() {
   if (!pgPool) {
-    return [];
+    // Return in-memory boats sorted by boat number
+    return inMemoryBoats.sort((a, b) => a.boat_number - b.boat_number);
   }
 
   const query = 'SELECT * FROM boats ORDER BY boat_number ASC';
@@ -407,7 +459,10 @@ async function getAllBoats() {
  */
 async function getBoat(identifier) {
   if (!pgPool) {
-    return null;
+    // Search in-memory boats by boat_number or imei
+    return inMemoryBoats.find(boat =>
+      boat.boat_number == identifier || boat.imei === identifier
+    ) || null;
   }
 
   const query = `
