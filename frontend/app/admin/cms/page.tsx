@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import BoatCMS from '../../components/BoatCMS';
+import BoatCMS from '../../../components/BoatCMS';
 
 interface CMSStats {
   total_boats: number;

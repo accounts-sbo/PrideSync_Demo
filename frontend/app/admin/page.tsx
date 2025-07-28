@@ -1,241 +1,92 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
-interface SystemStatus {
-  backend: 'online' | 'offline' | 'checking';
-  database: 'online' | 'offline' | 'checking';
-  gps: 'active' | 'inactive' | 'checking';
-}
-
-export default function AdminDashboard() {
-  const [currentTime, setCurrentTime] = useState<string>('');
-  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
-    backend: 'checking',
-    database: 'checking',
-    gps: 'checking'
-  });
-
-  useEffect(() => {
-    const updateTime = () => {
-      setCurrentTime(new Date().toLocaleString('nl-NL'));
-    };
-    
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    checkSystemStatus();
-    const interval = setInterval(checkSystemStatus, 30000); // Check every 30 seconds
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const checkSystemStatus = async () => {
-    // Check backend health
-    try {
-      const backendUrl = process.env.NODE_ENV === 'production'
-        ? 'https://pridesyncdemo-production.up.railway.app'
-        : 'http://localhost:3001';
-        
-      const response = await fetch(`${backendUrl}/health`);
-      if (response.ok) {
-        setSystemStatus(prev => ({ ...prev, backend: 'online', database: 'online' }));
-      } else {
-        setSystemStatus(prev => ({ ...prev, backend: 'offline', database: 'offline' }));
-      }
-    } catch (error) {
-      setSystemStatus(prev => ({ ...prev, backend: 'offline', database: 'offline' }));
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online':
-      case 'active':
-        return 'text-green-600 bg-green-100';
-      case 'offline':
-      case 'inactive':
-        return 'text-red-600 bg-red-100';
-      default:
-        return 'text-yellow-600 bg-yellow-100';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'online':
-      case 'active':
-        return '✅';
-      case 'offline':
-      case 'inactive':
-        return '❌';
-      default:
-        return '⏳';
-    }
-  };
-
-  const backendUrl = process.env.NODE_ENV === 'production'
-    ? 'https://pridesyncdemo-production.up.railway.app'
-    : 'http://localhost:3001';
-
+export default function AdminPage() {
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/" className="text-2xl font-bold text-gray-800">
-                🏳️‍🌈 PrideSync Admin
-              </Link>
-              <span className="text-sm text-gray-500">
-                {currentTime}
-              </span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">System Status:</span>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(systemStatus.backend)}`}>
-                {getStatusIcon(systemStatus.backend)} Backend
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
-        {/* System Status Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-800">Backend API</h3>
-                <p className="text-sm text-gray-600">Core system status</p>
-              </div>
-              <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(systemStatus.backend)}`}>
-                {getStatusIcon(systemStatus.backend)} {systemStatus.backend}
+        {/* Header */}
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            🏳️‍🌈 PrideSync Admin
+          </h1>
+          <p className="text-gray-600">
+            Administrative dashboard for Pride Parade management
+          </p>
+        </header>
+
+        {/* Admin Tools Grid */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* CMS */}
+          <Link href="/admin/cms" className="group">
+            <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-blue-500">
+              <div className="text-4xl mb-4">🛠️</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">
+                Content Management
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Manage boats, participants, and parade content
+              </p>
+              <div className="text-blue-600 font-semibold group-hover:text-blue-700">
+                Open CMS →
               </div>
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-800">Database</h3>
-                <p className="text-sm text-gray-600">PostgreSQL connection</p>
-              </div>
-              <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(systemStatus.database)}`}>
-                {getStatusIcon(systemStatus.database)} {systemStatus.database}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-800">GPS Tracking</h3>
-                <p className="text-sm text-gray-600">Real-time updates</p>
-              </div>
-              <div className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(systemStatus.gps)}`}>
-                {getStatusIcon(systemStatus.gps)} {systemStatus.gps}
+          {/* Dashboard */}
+          <Link href="/admin/dashboard" className="group">
+            <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-purple-500">
+              <div className="text-4xl mb-4">📊</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">
+                Live Dashboard
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Real-time monitoring and control of the parade
+              </p>
+              <div className="text-purple-600 font-semibold group-hover:text-purple-700">
+                Open Dashboard →
               </div>
             </div>
-          </div>
-        </div>
+          </Link>
 
-        {/* Quick Actions */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {/* Device Management */}
-          <a href={`${backendUrl}/api/device-management/cms`} 
-             target="_blank" 
-             rel="noopener noreferrer"
-             className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow group">
-            <div className="text-3xl mb-4">🔧</div>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Device Management</h3>
-            <p className="text-gray-600 mb-4">
-              Koppel IMEI nummers aan boten en beheer tracker devices
-            </p>
-            <div className="text-blue-600 font-semibold group-hover:text-blue-700">
-              Open CMS →
-            </div>
-          </a>
-
-          {/* API Documentation */}
-          <a href={`${backendUrl}/health`} 
-             target="_blank" 
-             rel="noopener noreferrer"
-             className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow group">
-            <div className="text-3xl mb-4">📡</div>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">API Health Check</h3>
-            <p className="text-gray-600 mb-4">
-              Controleer backend status en API endpoints
-            </p>
-            <div className="text-green-600 font-semibold group-hover:text-green-700">
-              Check API →
-            </div>
-          </a>
-
-          {/* Voting Dashboard */}
-          <Link href="/2025" className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow group">
-            <div className="text-3xl mb-4">🗳️</div>
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Voting App 2025</h3>
-            <p className="text-gray-600 mb-4">
-              Pride Boat Ballot - publieke stemming interface
-            </p>
-            <div className="text-purple-600 font-semibold group-hover:text-purple-700">
-              Open App →
+          {/* Back to Public Site */}
+          <Link href="/" className="group">
+            <div className="bg-white rounded-xl shadow-lg p-6 hover:shadow-xl transition-shadow border-l-4 border-green-500">
+              <div className="text-4xl mb-4">🌐</div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">
+                Public Website
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Return to the main PrideSync website
+              </p>
+              <div className="text-green-600 font-semibold group-hover:text-green-700">
+                Go to Website →
+              </div>
             </div>
           </Link>
         </div>
 
-        {/* API Endpoints */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">🔗 API Endpoints</h3>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <h4 className="font-semibold text-gray-700 mb-2">Webhooks</h4>
-              <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/webhooks/tracker-gps</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/webhooks/kpn-gps</code></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-700 mb-2">Voting</h4>
-              <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/voting/boats</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/voting/vote</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/voting/leaderboard</code></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-700 mb-2">Device Management</h4>
-              <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/device-management/mappings</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">POST /api/device-management/mappings</code></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="font-semibold text-gray-700 mb-2">Boats</h4>
-              <ul className="space-y-1 text-sm">
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/boats</code></li>
-                <li><code className="bg-gray-100 px-2 py-1 rounded">GET /api/parade/status</code></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        {/* Demo Instructions */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="text-xl font-bold text-blue-800 mb-4">🚀 Demo Instructions</h3>
-          <div className="space-y-3 text-blue-700">
-            <p><strong>1. Device Setup:</strong> Open Device Management CMS en koppel IMEI nummers aan boten</p>
-            <p><strong>2. GPS Simulation:</strong> Run <code className="bg-blue-100 px-2 py-1 rounded">npm run simulate-gps</code> in backend</p>
-            <p><strong>3. Test Voting:</strong> Open de 2025 app en test het stemmen op boten</p>
-            <p><strong>4. Monitor:</strong> Check de backend logs voor real-time GPS updates</p>
+        {/* Quick Stats */}
+        <div className="mt-8 bg-white rounded-xl shadow-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Access</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Link href="/2025" className="text-center p-4 bg-pink-50 rounded-lg hover:bg-pink-100 transition-colors">
+              <div className="text-2xl mb-2">👥</div>
+              <div className="text-sm font-medium text-pink-800">Kijkers App</div>
+            </Link>
+            <Link href="/skipper" className="text-center p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+              <div className="text-2xl mb-2">⚓</div>
+              <div className="text-sm font-medium text-blue-800">Schippers App</div>
+            </Link>
+            <Link href="/support" className="text-center p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
+              <div className="text-2xl mb-2">💬</div>
+              <div className="text-sm font-medium text-green-800">Support</div>
+            </Link>
+            <Link href="/privacy" className="text-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div className="text-2xl mb-2">🔒</div>
+              <div className="text-sm font-medium text-gray-800">Privacy</div>
+            </Link>
           </div>
         </div>
       </div>
