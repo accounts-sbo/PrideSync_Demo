@@ -86,7 +86,7 @@ export default function ImportPage() {
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">📊 Import KPN Boats Data</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-8">📊 Import KPN Boats Data v2</h1>
 
           {/* Instructions */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
