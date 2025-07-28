@@ -9,9 +9,12 @@
     "test": "jest",
     "build": "echo 'No build step required for Node.js'",
     "postinstall": "echo 'Installation complete'",
+    "reset-db": "node scripts/reset-database.js",
+    "import-pride-boats": "node scripts/import-pride-boats.js",
+    "import-kpn-trackers": "node scripts/import-kpn-trackers.js",
     "import-boats": "node scripts/import-boats.js",
     "simulate-gps": "node scripts/gps-simulator.js",
-    "setup-demo": "npm run import-boats && echo 'Demo setup complete! Run npm run simulate-gps to start GPS simulation.'"
+    "setup-demo": "npm run reset-db && echo 'Database reset complete! Import your CSV files next.'"
   },
   "keywords": [
     "pride",

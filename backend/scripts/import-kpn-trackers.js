@@ -12,7 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { initializeDatabase, createBoat, getAllBoats } = require('../src/models/database');
+const { initializeDatabase, createKPNTracker, getAllKPNTrackers } = require('../src/models/database');
 const logger = require('../src/services/logger');
 
 // Parse CSV line (simple parser - handles basic CSV)
@@ -61,42 +61,47 @@ function parseDecimal(str) {
   }
 }
 
-// Convert KPN row to boat object
-function convertKPNRowToBoat(row, headers) {
+// Convert KPN row to tracker object
+function convertKPNRowToTracker(row, headers) {
   const data = {};
-  
+
   // Map headers to data
   headers.forEach((header, index) => {
     data[header] = row[index] || '';
   });
-  
-  // Extract boat number from Name field (assuming it's the boat number)
-  const boatNumber = parseInt(data['Name']);
-  if (isNaN(boatNumber)) {
-    throw new Error(`Invalid boat number in Name field: ${data['Name']}`);
+
+  // Validate tracker name (this is what we get in webhooks)
+  const trackerName = data['Name'];
+  if (!trackerName || trackerName.trim() === '') {
+    throw new Error(`Missing tracker name in Name field`);
   }
-  
+
+  // Validate asset code
+  const assetCode = data['Asset Code'];
+  if (!assetCode || assetCode.trim() === '') {
+    throw new Error(`Missing asset code for tracker ${trackerName}`);
+  }
+
   return {
-    boat_number: boatNumber,
-    name: `Pride Boat ${boatNumber}`,
-    description: data['Description'] || `KPN Tracked Boat ${boatNumber}`,
-    status: 'waiting',
-    
-    // KPN specific fields
-    asset_code: data['Asset Code'],
+    tracker_name: trackerName,
+    asset_code: assetCode,
     asset_type: data['Asset Type'] || 'Boat',
     device_type: data['Device Type'],
     serial_number: data['Serial Number'],
+    imei: data['Description'], // KPN puts IMEI in description field
     enabled: data['Enabled'] === 'Enabled',
     last_connected: parseKPNDate(data['Last Connected']),
     current_status: data['Current Status'],
     odometer_km: parseDecimal(data['Odometer (km)']),
-    run_hours: parseDecimal(data['Run Hours (hrs)'])
+    run_hours: parseDecimal(data['Run Hours (hrs)']),
+    project: data['Project'],
+    department: data['Department'],
+    description: `KPN Tracker ${trackerName} (${assetCode})`
   };
 }
 
-async function importKPNBoats(csvFilePath) {
-  console.log('🚀 Starting KPN Boats import...\n');
+async function importKPNTrackers(csvFilePath) {
+  console.log('📡 Starting KPN Trackers import...\n');
   
   // Check if file exists
   if (!fs.existsSync(csvFilePath)) {
@@ -129,44 +134,44 @@ async function importKPNBoats(csvFilePath) {
       throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
     }
     
-    console.log(`📊 Found ${lines.length - 1} boats to import\n`);
-    
-    // Process each boat
+    console.log(`📊 Found ${lines.length - 1} trackers to import\n`);
+
+    // Process each tracker
     let imported = 0;
     let skipped = 0;
     let errors = 0;
-    
+
     for (let i = 1; i < lines.length; i++) {
       try {
         const row = parseCSVLine(lines[i]);
-        
+
         if (row.length !== headers.length) {
           console.log(`⚠️ Row ${i}: Column count mismatch, skipping`);
           skipped++;
           continue;
         }
-        
-        const boatData = convertKPNRowToBoat(row, headers);
-        
-        // Try to create boat
-        await createBoat(boatData);
-        console.log(`✅ Imported boat ${boatData.boat_number}: ${boatData.name}`);
+
+        const trackerData = convertKPNRowToTracker(row, headers);
+
+        // Try to create tracker
+        await createKPNTracker(trackerData);
+        console.log(`✅ Imported tracker ${trackerData.tracker_name}: ${trackerData.asset_code}`);
         imported++;
-        
+
       } catch (error) {
         console.log(`❌ Row ${i}: ${error.message}`);
         errors++;
       }
     }
-    
-    console.log('\n🎉 Import completed!');
-    console.log(`✅ Imported: ${imported} boats`);
-    console.log(`⚠️ Skipped: ${skipped} boats`);
-    console.log(`❌ Errors: ${errors} boats`);
-    
+
+    console.log('\n🎉 KPN Trackers import completed!');
+    console.log(`✅ Imported: ${imported} trackers`);
+    console.log(`⚠️ Skipped: ${skipped} trackers`);
+    console.log(`❌ Errors: ${errors} trackers`);
+
     // Show final stats
-    const allBoats = await getAllBoats();
-    console.log(`\n📊 Total boats in database: ${allBoats.length}`);
+    const allTrackers = await getAllKPNTrackers();
+    console.log(`\n📊 Total trackers in database: ${allTrackers.length}`);
     
   } catch (error) {
     console.error('❌ Import failed:', error.message);
@@ -179,15 +184,17 @@ if (require.main === module) {
   const csvFilePath = process.argv[2];
   
   if (!csvFilePath) {
-    console.log('Usage: node scripts/import-kpn-boats.js <csv-file-path>');
+    console.log('Usage: node scripts/import-kpn-trackers.js <csv-file-path>');
     console.log('\nExample:');
-    console.log('  node scripts/import-kpn-boats.js data/kpn-boats.csv');
+    console.log('  node scripts/import-kpn-trackers.js data/kpn-trackers.csv');
     console.log('\nExpected CSV format:');
     console.log('Asset Type,Name,Description,Project,Department,Asset Code,Device Type,Serial Number,Enabled,Last Connected,Last Trip,Current Status,Odometer (km),Run Hours (hrs)');
+    console.log('\nNote: "Name" field is the tracker identifier used in webhooks');
+    console.log('      "Asset Code" is the reference (P1, P2, O1, O2, R1, etc.)');
     process.exit(1);
   }
-  
-  importKPNBoats(csvFilePath).catch(console.error);
+
+  importKPNTrackers(csvFilePath).catch(console.error);
 }
 
-module.exports = { importKPNBoats };
+module.exports = { importKPNTrackers };

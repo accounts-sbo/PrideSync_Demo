@@ -90,74 +90,97 @@ async function initializeDatabase() {
  * Create database tables
  */
 async function createTables() {
-  // Boats table with extended fields for Pride data and KPN tracking
-  const createBoatsTable = `
-    CREATE TABLE IF NOT EXISTS boats (
+  // Pride Boats table (Official parade boats from organization)
+  const createPrideBoatsTable = `
+    CREATE TABLE IF NOT EXISTS pride_boats (
       id SERIAL PRIMARY KEY,
-      boat_number INTEGER UNIQUE NOT NULL,
-      name VARCHAR(255) NOT NULL,
-      imei VARCHAR(20),
+      parade_position INTEGER UNIQUE NOT NULL,
+      boat_name VARCHAR(255) NOT NULL,
+      organisation VARCHAR(255),
+      theme TEXT,
       description TEXT,
       captain_name VARCHAR(255),
       captain_phone VARCHAR(20),
-      status VARCHAR(50) DEFAULT 'waiting',
-      organisation VARCHAR(255),
-      theme TEXT,
-      mac_address VARCHAR(17),
-      -- KPN Tracking fields
-      asset_code VARCHAR(50),
-      asset_type VARCHAR(50) DEFAULT 'Boat',
-      device_type VARCHAR(100),
-      serial_number VARCHAR(50),
-      enabled BOOLEAN DEFAULT true,
-      last_connected TIMESTAMP,
-      current_status VARCHAR(100),
-      odometer_km DECIMAL(10,2),
-      run_hours DECIMAL(10,2),
+      captain_email VARCHAR(255),
+      boat_type VARCHAR(100),
+      length_meters DECIMAL(5,2),
+      width_meters DECIMAL(5,2),
+      max_persons INTEGER,
+      status VARCHAR(50) DEFAULT 'registered',
+      notes TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `;
 
-  // Device mappings table for linking tracker devices to boats
-  const createDeviceMappingsTable = `
-    CREATE TABLE IF NOT EXISTS device_mappings (
+  // KPN Trackers table (Physical tracking devices)
+  const createKPNTrackersTable = `
+    CREATE TABLE IF NOT EXISTS kpn_trackers (
       id SERIAL PRIMARY KEY,
-      boat_id INTEGER,
-      boat_number INTEGER,
-      device_imei VARCHAR(20) UNIQUE,
-      device_serial VARCHAR(50),
-      mac_address VARCHAR(17),
-      is_active BOOLEAN DEFAULT true,
+      tracker_name VARCHAR(50) UNIQUE NOT NULL, -- KPN "Name" field (e.g., "1326954")
+      asset_code VARCHAR(20) NOT NULL, -- P1, P2, O1, O2, R1, etc.
+      asset_type VARCHAR(50) DEFAULT 'Boat',
+      device_type VARCHAR(100),
+      serial_number VARCHAR(50),
+      imei VARCHAR(20),
+      enabled BOOLEAN DEFAULT true,
+      last_connected TIMESTAMP,
+      last_trip TIMESTAMP,
+      current_status VARCHAR(100),
+      odometer_km DECIMAL(10,2),
+      run_hours DECIMAL(10,2),
+      project VARCHAR(50),
+      department VARCHAR(50),
+      description TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE,
-      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `;
 
-  // Votes table for the 2025 voting app
+  // Boat-Tracker Mappings (Links Pride boats to KPN trackers)
+  const createBoatTrackerMappingsTable = `
+    CREATE TABLE IF NOT EXISTS boat_tracker_mappings (
+      id SERIAL PRIMARY KEY,
+      pride_boat_id INTEGER,
+      kpn_tracker_id INTEGER,
+      parade_position INTEGER,
+      tracker_name VARCHAR(50),
+      asset_code VARCHAR(20),
+      is_active BOOLEAN DEFAULT true,
+      mapped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      mapped_by VARCHAR(100),
+      notes TEXT,
+      FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+      FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE CASCADE,
+      FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE,
+      UNIQUE(pride_boat_id, is_active) -- Only one active mapping per boat
+    );
+  `;
+
+  // Votes table for the 2025 voting app (updated for new structure)
   const createVotesTable = `
     CREATE TABLE IF NOT EXISTS votes (
       id SERIAL PRIMARY KEY,
-      boat_id INTEGER,
-      boat_number INTEGER,
+      pride_boat_id INTEGER,
+      parade_position INTEGER,
       vote_type VARCHAR(10) CHECK(vote_type IN ('heart', 'star')),
       user_session VARCHAR(255),
       ip_address INET,
       user_agent TEXT,
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (boat_id) REFERENCES boats(id) ON DELETE CASCADE,
-      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
+      FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+      FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE
     );
   `;
 
-  // Enhanced positions table with IMEI and additional tracking
+  // GPS Positions table (linked to trackers)
   const createPositionsTable = `
-    CREATE TABLE IF NOT EXISTS boat_positions (
+    CREATE TABLE IF NOT EXISTS gps_positions (
       id SERIAL PRIMARY KEY,
-      boat_number INTEGER NOT NULL,
-      imei VARCHAR(20),
+      tracker_name VARCHAR(50) NOT NULL, -- KPN tracker name from webhook
+      kpn_tracker_id INTEGER,
+      pride_boat_id INTEGER,
+      parade_position INTEGER,
       latitude DECIMAL(10, 8) NOT NULL,
       longitude DECIMAL(11, 8) NOT NULL,
       route_distance INTEGER DEFAULT 0,
@@ -169,43 +192,87 @@ async function createTables() {
       accuracy DECIMAL(6, 2),
       timestamp TIMESTAMP NOT NULL,
       received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
+      raw_data JSONB, -- Store original webhook data
+      FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+      FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
     );
   `;
 
   const createIncidentsTable = `
-    CREATE TABLE IF NOT EXISTS boat_incidents (
+    CREATE TABLE IF NOT EXISTS incidents (
       id SERIAL PRIMARY KEY,
-      boat_number INTEGER NOT NULL,
+      tracker_name VARCHAR(50),
+      kpn_tracker_id INTEGER,
+      pride_boat_id INTEGER,
+      parade_position INTEGER,
       incident_type VARCHAR(100) NOT NULL,
       severity VARCHAR(20) DEFAULT 'info',
       message TEXT,
       metadata JSONB,
       timestamp TIMESTAMP NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (boat_number) REFERENCES boats(boat_number) ON DELETE CASCADE
+      FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+      FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
     );
   `;
 
   const createIndexes = `
-    CREATE INDEX IF NOT EXISTS idx_boat_positions_boat_number ON boat_positions(boat_number);
-    CREATE INDEX IF NOT EXISTS idx_boat_positions_timestamp ON boat_positions(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_boat_incidents_boat_number ON boat_incidents(boat_number);
-    CREATE INDEX IF NOT EXISTS idx_boat_incidents_timestamp ON boat_incidents(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_name ON gps_positions(tracker_name);
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp ON gps_positions(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_pride_boat ON gps_positions(pride_boat_id);
+    CREATE INDEX IF NOT EXISTS idx_boat_tracker_mappings_active ON boat_tracker_mappings(is_active);
+    CREATE INDEX IF NOT EXISTS idx_kpn_trackers_asset_code ON kpn_trackers(asset_code);
+    CREATE INDEX IF NOT EXISTS idx_pride_boats_position ON pride_boats(parade_position);
   `;
 
   try {
-    await pgPool.query(createBoatsTable);
-    await pgPool.query(createDeviceMappingsTable);
+    await pgPool.query(createPrideBoatsTable);
+    await pgPool.query(createKPNTrackersTable);
+    await pgPool.query(createBoatTrackerMappingsTable);
     await pgPool.query(createVotesTable);
     await pgPool.query(createPositionsTable);
     await pgPool.query(createIncidentsTable);
     await pgPool.query(createIndexes);
 
     logger.info('✅ Database tables created/verified successfully');
+    logger.info('📊 New structure: pride_boats, kpn_trackers, boat_tracker_mappings');
   } catch (error) {
     logger.error('❌ Error creating database tables:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reset database - Drop and recreate all tables
+ */
+async function resetDatabase() {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const dropTables = `
+    DROP TABLE IF EXISTS incidents CASCADE;
+    DROP TABLE IF EXISTS gps_positions CASCADE;
+    DROP TABLE IF EXISTS votes CASCADE;
+    DROP TABLE IF EXISTS boat_tracker_mappings CASCADE;
+    DROP TABLE IF EXISTS kpn_trackers CASCADE;
+    DROP TABLE IF EXISTS pride_boats CASCADE;
+
+    -- Drop old tables if they exist
+    DROP TABLE IF EXISTS boat_incidents CASCADE;
+    DROP TABLE IF EXISTS boat_positions CASCADE;
+    DROP TABLE IF EXISTS device_mappings CASCADE;
+    DROP TABLE IF EXISTS boats CASCADE;
+  `;
+
+  try {
+    await pgPool.query(dropTables);
+    logger.info('🗑️ Old tables dropped');
+
+    await createTables();
+    logger.info('✅ Database reset complete with new structure');
+  } catch (error) {
+    logger.error('❌ Error resetting database:', error);
     throw error;
   }
 }
@@ -860,8 +927,158 @@ async function getUserVotes(userSession) {
   }
 }
 
+// === NEW CRUD FUNCTIONS FOR RESTRUCTURED DATABASE ===
+
+/**
+ * Pride Boats CRUD
+ */
+async function createPrideBoat(boatData) {
+  if (!pgPool) {
+    // In-memory fallback
+    const newBoat = {
+      id: inMemoryBoats.length + 1,
+      parade_position: boatData.parade_position,
+      boat_name: boatData.boat_name,
+      organisation: boatData.organisation || null,
+      theme: boatData.theme || null,
+      description: boatData.description || null,
+      captain_name: boatData.captain_name || null,
+      captain_phone: boatData.captain_phone || null,
+      status: boatData.status || 'registered',
+      created_at: new Date().toISOString()
+    };
+
+    inMemoryBoats.push(newBoat);
+    logger.info(`Pride boat created (in-memory): ${boatData.boat_name}`, { parade_position: boatData.parade_position });
+    return newBoat;
+  }
+
+  const query = `
+    INSERT INTO pride_boats (parade_position, boat_name, organisation, theme, description, captain_name, captain_phone, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING *;
+  `;
+
+  const values = [
+    boatData.parade_position,
+    boatData.boat_name,
+    boatData.organisation || null,
+    boatData.theme || null,
+    boatData.description || null,
+    boatData.captain_name || null,
+    boatData.captain_phone || null,
+    boatData.status || 'registered'
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Pride boat created: ${boatData.boat_name}`, { parade_position: boatData.parade_position });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error creating pride boat:', error);
+    throw error;
+  }
+}
+
+async function getAllPrideBoats() {
+  if (!pgPool) {
+    return inMemoryBoats.sort((a, b) => a.parade_position - b.parade_position);
+  }
+
+  const query = 'SELECT * FROM pride_boats ORDER BY parade_position ASC';
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching pride boats:', error);
+    return [];
+  }
+}
+
+/**
+ * KPN Trackers CRUD
+ */
+async function createKPNTracker(trackerData) {
+  if (!pgPool) {
+    // In-memory fallback
+    const newTracker = {
+      id: inMemoryDeviceMappings.length + 1,
+      tracker_name: trackerData.tracker_name,
+      asset_code: trackerData.asset_code,
+      device_type: trackerData.device_type || null,
+      serial_number: trackerData.serial_number || null,
+      enabled: trackerData.enabled !== undefined ? trackerData.enabled : true,
+      created_at: new Date().toISOString()
+    };
+
+    inMemoryDeviceMappings.push(newTracker);
+    logger.info(`KPN tracker created (in-memory): ${trackerData.tracker_name}`, { asset_code: trackerData.asset_code });
+    return newTracker;
+  }
+
+  const query = `
+    INSERT INTO kpn_trackers (tracker_name, asset_code, asset_type, device_type, serial_number, imei, enabled, current_status, project, department, description)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *;
+  `;
+
+  const values = [
+    trackerData.tracker_name,
+    trackerData.asset_code,
+    trackerData.asset_type || 'Boat',
+    trackerData.device_type || null,
+    trackerData.serial_number || null,
+    trackerData.imei || null,
+    trackerData.enabled !== undefined ? trackerData.enabled : true,
+    trackerData.current_status || null,
+    trackerData.project || null,
+    trackerData.department || null,
+    trackerData.description || null
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`KPN tracker created: ${trackerData.tracker_name}`, { asset_code: trackerData.asset_code });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error creating KPN tracker:', error);
+    throw error;
+  }
+}
+
+async function getAllKPNTrackers() {
+  if (!pgPool) {
+    return inMemoryDeviceMappings.sort((a, b) => a.asset_code.localeCompare(b.asset_code));
+  }
+
+  const query = 'SELECT * FROM kpn_trackers ORDER BY asset_code ASC';
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching KPN trackers:', error);
+    return [];
+  }
+}
+
+async function getKPNTrackerByName(trackerName) {
+  if (!pgPool) {
+    return inMemoryDeviceMappings.find(t => t.tracker_name === trackerName) || null;
+  }
+
+  const query = 'SELECT * FROM kpn_trackers WHERE tracker_name = $1';
+  try {
+    const result = await pgPool.query(query, [trackerName]);
+    return result.rows[0] || null;
+  } catch (error) {
+    logger.error('Error fetching KPN tracker by name:', error);
+    return null;
+  }
+}
+
 module.exports = {
   initializeDatabase,
+  resetDatabase,
   saveBoatPosition,
   saveBoatIncident,
   getBoatPositionHistory,
@@ -869,14 +1086,21 @@ module.exports = {
   cacheGet,
   cacheDel,
   closeConnections,
-  // Boat CRUD operations
+  // Legacy boat CRUD (for compatibility)
   createBoat,
   getAllBoats,
   getBoat,
   updateBoat,
   deleteBoat,
   bulkImportBoats,
-  // Device mapping operations
+  // New Pride Boats CRUD
+  createPrideBoat,
+  getAllPrideBoats,
+  // New KPN Trackers CRUD
+  createKPNTracker,
+  getAllKPNTrackers,
+  getKPNTrackerByName,
+  // Device mapping operations (legacy)
   createDeviceMapping,
   getDeviceMappingByIMEI,
   getAllDeviceMappings,
