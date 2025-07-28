@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://pridesyncdemo-production.up.railway.app',
     BACKEND_URL: process.env.NODE_ENV === 'production'
       ? 'https://pridesyncdemo-production.up.railway.app'
-      : 'http://localhost:3001',
+      : 'http://localhost:3000',
   },
 };
 
