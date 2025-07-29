@@ -780,6 +780,213 @@ async function updateDeviceMapping(id, updateData) {
 }
 
 /**
+ * Get all Pride boats
+ */
+async function getAllPrideBoats() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT * FROM pride_boats
+    ORDER BY parade_position ASC, nr ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching Pride boats:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all KPN trackers
+ */
+async function getAllKPNTrackers() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT * FROM kpn_trackers
+    ORDER BY asset_code ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching KPN trackers:', error);
+    return [];
+  }
+}
+
+/**
+ * Get all boat-tracker mappings with details
+ */
+async function getAllBoatTrackerMappings() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT
+      btm.*,
+      pb.nr as pride_boat_nr,
+      pb.naam as pride_boat_naam,
+      pb.organisatie_boot as pride_boat_organisatie,
+      pb.parade_position as pride_boat_position,
+      kt.asset_code as kpn_tracker_asset_code,
+      kt.name as kpn_tracker_name,
+      kt.device_type as kpn_tracker_device_type
+    FROM boat_tracker_mappings btm
+    LEFT JOIN pride_boats pb ON btm.pride_boat_id = pb.id
+    LEFT JOIN kpn_trackers kt ON btm.kpn_tracker_id = kt.id
+    ORDER BY pb.parade_position ASC, pb.nr ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching boat-tracker mappings:', error);
+    return [];
+  }
+}
+
+/**
+ * Get active boat-tracker mappings
+ */
+async function getAllActiveBoatTrackerMappings() {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT
+      btm.*,
+      pb.nr as pride_boat_nr,
+      pb.naam as pride_boat_naam,
+      kt.asset_code as kpn_tracker_asset_code,
+      kt.name as kpn_tracker_name
+    FROM boat_tracker_mappings btm
+    LEFT JOIN pride_boats pb ON btm.pride_boat_id = pb.id
+    LEFT JOIN kpn_trackers kt ON btm.kpn_tracker_id = kt.id
+    WHERE btm.is_active = true
+    ORDER BY pb.parade_position ASC, pb.nr ASC;
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching active boat-tracker mappings:', error);
+    return [];
+  }
+}
+
+/**
+ * Get active mappings for a specific boat
+ */
+async function getActiveBoatTrackerMappings(prideBoatId) {
+  if (!pgPool) {
+    return [];
+  }
+
+  const query = `
+    SELECT * FROM boat_tracker_mappings
+    WHERE pride_boat_id = $1 AND is_active = true;
+  `;
+
+  try {
+    const result = await pgPool.query(query, [prideBoatId]);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching active mappings for boat:', error);
+    return [];
+  }
+}
+
+/**
+ * Create boat-tracker mapping
+ */
+async function createBoatTrackerMapping(mappingData) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    INSERT INTO boat_tracker_mappings (pride_boat_id, kpn_tracker_id, notes, is_active)
+    VALUES ($1, $2, $3, $4)
+    RETURNING *;
+  `;
+
+  const values = [
+    mappingData.pride_boat_id,
+    mappingData.kpn_tracker_id,
+    mappingData.notes || null,
+    mappingData.is_active !== undefined ? mappingData.is_active : true
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`Boat-tracker mapping created: Pride boat ${mappingData.pride_boat_id} -> KPN tracker ${mappingData.kpn_tracker_id}`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error creating boat-tracker mapping:', error);
+    throw error;
+  }
+}
+
+/**
+ * Deactivate all mappings for a boat
+ */
+async function deactivateBoatTrackerMappings(prideBoatId) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    UPDATE boat_tracker_mappings
+    SET is_active = false, updated_at = CURRENT_TIMESTAMP
+    WHERE pride_boat_id = $1;
+  `;
+
+  try {
+    await pgPool.query(query, [prideBoatId]);
+    logger.info(`Deactivated all mappings for Pride boat ${prideBoatId}`);
+  } catch (error) {
+    logger.error('Error deactivating boat mappings:', error);
+    throw error;
+  }
+}
+
+/**
+ * Deactivate specific mapping
+ */
+async function deactivateBoatTrackerMapping(mappingId) {
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  const query = `
+    UPDATE boat_tracker_mappings
+    SET is_active = false, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1;
+  `;
+
+  try {
+    await pgPool.query(query, [mappingId]);
+    logger.info(`Deactivated boat-tracker mapping ${mappingId}`);
+  } catch (error) {
+    logger.error('Error deactivating boat-tracker mapping:', error);
+    throw error;
+  }
+}
+
+/**
  * Close database connections
  */
 async function closeConnections() {
@@ -1244,6 +1451,13 @@ module.exports = {
   getDeviceMappingByIMEI,
   getAllDeviceMappings,
   updateDeviceMapping,
+  // Boat-tracker mappings
+  getAllBoatTrackerMappings,
+  getAllActiveBoatTrackerMappings,
+  getActiveBoatTrackerMappings,
+  createBoatTrackerMapping,
+  deactivateBoatTrackerMappings,
+  deactivateBoatTrackerMapping,
   // Voting operations
   recordVote,
   getVoteCounts,
