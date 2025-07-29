@@ -11,6 +11,7 @@ let inMemoryBoats = [];
 let inMemoryPositions = [];
 let inMemoryVotes = [];
 let inMemoryDeviceMappings = [];
+let inMemoryWebhookLogs = [];
 
 /**
  * Initialize database connections
@@ -216,6 +217,25 @@ async function createTables() {
     );
   `;
 
+  // Webhook logs table for monitoring incoming data
+  const createWebhookLogsTable = `
+    CREATE TABLE IF NOT EXISTS webhook_logs (
+      id SERIAL PRIMARY KEY,
+      endpoint VARCHAR(100) NOT NULL,
+      method VARCHAR(10) NOT NULL,
+      headers JSONB,
+      body JSONB,
+      query_params JSONB,
+      ip_address INET,
+      user_agent TEXT,
+      response_status INTEGER,
+      response_body JSONB,
+      processing_time_ms INTEGER,
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+
   const createIndexes = `
     CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_name ON gps_positions(tracker_name);
     CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp ON gps_positions(timestamp);
@@ -223,6 +243,8 @@ async function createTables() {
     CREATE INDEX IF NOT EXISTS idx_boat_tracker_mappings_active ON boat_tracker_mappings(is_active);
     CREATE INDEX IF NOT EXISTS idx_kpn_trackers_asset_code ON kpn_trackers(asset_code);
     CREATE INDEX IF NOT EXISTS idx_pride_boats_position ON pride_boats(parade_position);
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint);
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at);
   `;
 
   try {
@@ -232,10 +254,11 @@ async function createTables() {
     await pgPool.query(createVotesTable);
     await pgPool.query(createPositionsTable);
     await pgPool.query(createIncidentsTable);
+    await pgPool.query(createWebhookLogsTable);
     await pgPool.query(createIndexes);
 
     logger.info('✅ Database tables created/verified successfully');
-    logger.info('📊 New structure: pride_boats, kpn_trackers, boat_tracker_mappings');
+    logger.info('📊 New structure: pride_boats, kpn_trackers, boat_tracker_mappings, webhook_logs');
   } catch (error) {
     logger.error('❌ Error creating database tables:', error);
     throw error;
@@ -1076,6 +1099,122 @@ async function getKPNTrackerByName(trackerName) {
   }
 }
 
+/**
+ * Webhook Logging Functions
+ */
+async function logWebhookRequest(webhookData) {
+  if (!pgPool) {
+    // In-memory fallback
+    const logEntry = {
+      id: inMemoryWebhookLogs.length + 1,
+      endpoint: webhookData.endpoint,
+      method: webhookData.method,
+      headers: webhookData.headers,
+      body: webhookData.body,
+      query_params: webhookData.query_params,
+      ip_address: webhookData.ip_address,
+      user_agent: webhookData.user_agent,
+      response_status: webhookData.response_status,
+      response_body: webhookData.response_body,
+      processing_time_ms: webhookData.processing_time_ms,
+      error_message: webhookData.error_message,
+      created_at: new Date().toISOString()
+    };
+
+    inMemoryWebhookLogs.unshift(logEntry); // Add to beginning
+
+    // Keep only last 100 entries in memory
+    if (inMemoryWebhookLogs.length > 100) {
+      inMemoryWebhookLogs = inMemoryWebhookLogs.slice(0, 100);
+    }
+
+    logger.debug(`Webhook logged (in-memory): ${webhookData.endpoint}`, { status: webhookData.response_status });
+    return logEntry;
+  }
+
+  const query = `
+    INSERT INTO webhook_logs (endpoint, method, headers, body, query_params, ip_address, user_agent, response_status, response_body, processing_time_ms, error_message)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    RETURNING *;
+  `;
+
+  const values = [
+    webhookData.endpoint,
+    webhookData.method,
+    JSON.stringify(webhookData.headers),
+    JSON.stringify(webhookData.body),
+    JSON.stringify(webhookData.query_params),
+    webhookData.ip_address,
+    webhookData.user_agent,
+    webhookData.response_status,
+    JSON.stringify(webhookData.response_body),
+    webhookData.processing_time_ms,
+    webhookData.error_message
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.debug(`Webhook logged: ${webhookData.endpoint}`, { id: result.rows[0].id, status: webhookData.response_status });
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error logging webhook:', error);
+    throw error;
+  }
+}
+
+async function getWebhookLogs(limit = 50, offset = 0) {
+  if (!pgPool) {
+    return inMemoryWebhookLogs.slice(offset, offset + limit);
+  }
+
+  const query = `
+    SELECT * FROM webhook_logs
+    ORDER BY created_at DESC
+    LIMIT $1 OFFSET $2
+  `;
+
+  try {
+    const result = await pgPool.query(query, [limit, offset]);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error fetching webhook logs:', error);
+    return [];
+  }
+}
+
+async function getWebhookStats() {
+  if (!pgPool) {
+    const total = inMemoryWebhookLogs.length;
+    const last24h = inMemoryWebhookLogs.filter(log =>
+      new Date(log.created_at) > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    ).length;
+
+    return {
+      total_requests: total,
+      last_24h: last24h,
+      endpoints: [...new Set(inMemoryWebhookLogs.map(log => log.endpoint))],
+      latest_request: inMemoryWebhookLogs[0]?.created_at || null
+    };
+  }
+
+  const query = `
+    SELECT
+      COUNT(*) as total_requests,
+      COUNT(CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN 1 END) as last_24h,
+      MAX(created_at) as latest_request,
+      array_agg(DISTINCT endpoint) as endpoints
+    FROM webhook_logs
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('Error fetching webhook stats:', error);
+    return { total_requests: 0, last_24h: 0, endpoints: [], latest_request: null };
+  }
+}
+
 module.exports = {
   initializeDatabase,
   resetDatabase,
@@ -1109,6 +1248,10 @@ module.exports = {
   recordVote,
   getVoteCounts,
   getUserVotes,
+  // Webhook logging
+  logWebhookRequest,
+  getWebhookLogs,
+  getWebhookStats,
   // Database connections
   pgPool: () => pgPool,
   redisClient: () => redisClient

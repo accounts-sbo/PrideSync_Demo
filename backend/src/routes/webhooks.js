@@ -7,6 +7,58 @@ const database = require('../models/database');
 
 const router = express.Router();
 
+// Middleware to log all webhook requests
+async function logWebhookMiddleware(req, res, next) {
+  const startTime = Date.now();
+
+  // Store original res.json to capture response
+  const originalJson = res.json;
+  let responseBody = null;
+  let responseStatus = null;
+
+  res.json = function(body) {
+    responseBody = body;
+    responseStatus = res.statusCode;
+    return originalJson.call(this, body);
+  };
+
+  // Store original res.status to capture status
+  const originalStatus = res.status;
+  res.status = function(code) {
+    responseStatus = code;
+    return originalStatus.call(this, code);
+  };
+
+  // Continue to next middleware
+  next();
+
+  // Log after response is sent
+  res.on('finish', async () => {
+    const processingTime = Date.now() - startTime;
+
+    try {
+      await database.logWebhookRequest({
+        endpoint: req.path,
+        method: req.method,
+        headers: req.headers,
+        body: req.body,
+        query_params: req.query,
+        ip_address: req.ip || req.connection.remoteAddress,
+        user_agent: req.get('User-Agent'),
+        response_status: responseStatus || res.statusCode,
+        response_body: responseBody,
+        processing_time_ms: processingTime,
+        error_message: null
+      });
+    } catch (error) {
+      logger.error('Failed to log webhook request:', error);
+    }
+  });
+}
+
+// Apply logging middleware to all webhook routes
+router.use(logWebhookMiddleware);
+
 // Enhanced validation schema for KPN GPS webhook
 const gpsPayloadSchema = Joi.object({
   bootnummer: Joi.number().integer().min(1).max(999).optional(),
@@ -460,5 +512,65 @@ async function notifyFrontend(bootId, statusData) {
   // For now, data is available via API endpoints
   logger.debug(`Status update ready for boat ${bootId}`, statusData);
 }
+
+/**
+ * Get Webhook Logs
+ * GET /api/webhooks/logs
+ *
+ * Returns recent webhook requests for monitoring
+ */
+router.get('/logs', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const logs = await database.getWebhookLogs(limit, offset);
+    const stats = await database.getWebhookStats();
+
+    res.json({
+      success: true,
+      data: {
+        logs,
+        stats,
+        pagination: {
+          limit,
+          offset,
+          total: stats.total_requests
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching webhook logs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch webhook logs',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get Webhook Statistics
+ * GET /api/webhooks/stats
+ *
+ * Returns webhook usage statistics
+ */
+router.get('/stats', async (req, res) => {
+  try {
+    const stats = await database.getWebhookStats();
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error('Error fetching webhook stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch webhook stats',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;

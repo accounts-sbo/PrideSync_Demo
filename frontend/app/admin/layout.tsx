@@ -25,11 +25,17 @@ export default function AdminLayout({
               >
                 CMS
               </Link>
-              <Link 
-                href="/admin/dashboard" 
+              <Link
+                href="/admin/dashboard"
                 className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
               >
                 Dashboard
+              </Link>
+              <Link
+                href="/admin/webhooks"
+                className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
+              >
+                Webhooks
               </Link>
               <Link 
                 href="/" 
