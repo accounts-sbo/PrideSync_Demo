@@ -46,18 +46,27 @@ function convertRowToPrideBoat(row, headers) {
     data[header] = row[index] || '';
   });
   
-  // Extract parade position
-  const paradePosition = parseInt(data['Parade Position'] || data['Position'] || data['Nummer']);
+  // Extract parade position - support your "Nr" column
+  const paradePosition = parseInt(data['Nr'] || data['Parade Position'] || data['Position'] || data['Nummer']);
   if (isNaN(paradePosition)) {
-    throw new Error(`Invalid parade position: ${data['Parade Position']}`);
+    throw new Error(`Invalid parade position: ${data['Nr'] || data['Parade Position']}`);
   }
-  
+
+  // Get boat name - use "Naam" column, fallback to organisation name
+  const boatName = data['Naam'] || data['Boat Name'] || data['Name'] || data['Organisatie/Boot'] || `Boot ${paradePosition}`;
+
+  // Get organisation - use "Organisatie/Boot" column
+  const organisation = data['Organisatie/Boot'] || data['Organisation'] || data['Organisatie'] || null;
+
+  // Get theme/description - use "Thema/Korte beschrijving" column
+  const themeDescription = data['Thema/Korte beschrijving'] || data['Theme'] || data['Thema'] || data['Description'] || data['Beschrijving'] || null;
+
   return {
     parade_position: paradePosition,
-    boat_name: data['Boat Name'] || data['Name'] || data['Naam'] || `Boot ${paradePosition}`,
-    organisation: data['Organisation'] || data['Organisatie'] || null,
-    theme: data['Theme'] || data['Thema'] || null,
-    description: data['Description'] || data['Beschrijving'] || null,
+    boat_name: boatName,
+    organisation: organisation,
+    theme: themeDescription,
+    description: themeDescription, // Use same field for both theme and description
     captain_name: data['Captain Name'] || data['Schipper'] || null,
     captain_phone: data['Captain Phone'] || data['Telefoon'] || null,
     captain_email: data['Captain Email'] || data['Email'] || null,
@@ -65,7 +74,7 @@ function convertRowToPrideBoat(row, headers) {
     length_meters: parseFloat(data['Length'] || data['Lengte']) || null,
     width_meters: parseFloat(data['Width'] || data['Breedte']) || null,
     max_persons: parseInt(data['Max Persons'] || data['Max Personen']) || null,
-    notes: data['Notes'] || data['Opmerkingen'] || null,
+    notes: data['Notes'] || data['Opmerkingen'] || data['MAC Address Tracker'] || null, // Store MAC address in notes for now
     status: 'registered'
   };
 }

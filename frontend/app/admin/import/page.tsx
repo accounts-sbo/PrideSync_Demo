@@ -93,9 +93,12 @@ export default function ImportPage() {
             <h2 className="text-lg font-semibold text-blue-900 mb-4">📋 Instructions</h2>
             <div className="space-y-2 text-blue-800">
               <p><strong>1. Convert Excel to CSV:</strong> Open your Excel file and save as CSV (Comma delimited)</p>
-              <p><strong>2. Required columns:</strong> Asset Type, Name, Asset Code, Device Type, Serial Number</p>
-              <p><strong>3. Name field:</strong> Should contain the boat number (e.g., "1326954")</p>
-              <p><strong>4. Upload:</strong> Select your CSV file and click Import</p>
+              <p><strong>2. Supported formats:</strong></p>
+              <ul className="ml-4 space-y-1">
+                <li>• <strong>Pride Boats:</strong> Nr, Naam, Organisatie/Boot, Thema/Korte beschrijving</li>
+                <li>• <strong>KPN Trackers:</strong> Asset Type, Name, Asset Code, Device Type, Serial Number</li>
+              </ul>
+              <p><strong>3. Upload:</strong> Select your CSV file and click Import</p>
             </div>
           </div>
 
@@ -178,12 +181,23 @@ export default function ImportPage() {
           {/* Expected Format */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold mb-4">📋 Expected CSV Format</h2>
-            <div className="bg-gray-100 p-4 rounded">
-              <code className="text-sm">
-                Asset Type,Name,Description,Project,Department,Asset Code,Device Type,Serial Number,Enabled,Last Connected,Last Trip,Current Status,Odometer (km),Run Hours (hrs)<br/>
-                Boat,1326954,353760970748614,,P2,Oyster 3 - Fusion Global Bluetooth,1326954,Enabled,2025/07/25,,Parked at 1,,<br/>
-                Boat,1326997,353760970649317,,P1,Oyster 3 - Fusion Global Bluetooth,1326997,Enabled,2025/07/25,2025/07/09,Parked at 1,532.35,7.69
-              </code>
+            <div className="bg-gray-100 p-4 rounded space-y-4">
+              <div>
+                <h4 className="font-semibold mb-2">Pride Boats Format:</h4>
+                <code className="text-sm block">
+                  Naam,Nr,MAC Address Tracker,Organisatie/Boot,Thema/Korte beschrijving<br/>
+                  Stichting Pride Amsterdam,0,,Stichting Pride Amsterdam,Hoofdorganisatie van de Amsterdam Pride<br/>
+                  Trans Pride powered by Rabobank,2,,Trans Pride powered by Rabobank,Steunt en viert de rechten van transpersonen
+                </code>
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">KPN Trackers Format:</h4>
+                <code className="text-sm block">
+                  Asset Type,Name,Description,Asset Code,Device Type,Serial Number,Enabled<br/>
+                  Boat,1326954,353760970748614,P2,Oyster 3 - Fusion Global Bluetooth,1326954,Enabled<br/>
+                  Boat,1326997,353760970649317,P1,Oyster 3 - Fusion Global Bluetooth,1326997,Enabled
+                </code>
+              </div>
             </div>
           </div>
         </div>

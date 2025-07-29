@@ -369,27 +369,57 @@ router.post('/import-boats', upload.single('csvFile'), async (req, res) => {
           data[header] = row[index] || '';
         });
 
-        // Extract boat number from Name field
-        const boatNumber = parseInt(data['Name']);
-        if (isNaN(boatNumber)) {
+        // Detect if this is Pride boats CSV or KPN trackers CSV
+        const isPrideBoatsCSV = headers.includes('Nr') && headers.includes('Naam') && headers.includes('Organisatie/Boot');
+        const isKPNTrackersCSV = headers.includes('Asset Code') && headers.includes('Name') && headers.includes('Device Type');
+
+        let boatData;
+
+        if (isPrideBoatsCSV) {
+          // Handle Pride boats CSV format
+          const paradePosition = parseInt(data['Nr']);
+          if (isNaN(paradePosition)) {
+            errors++;
+            errorDetails.push(`Row ${i}: Invalid parade position in Nr field: ${data['Nr']}`);
+            continue;
+          }
+
+          boatData = {
+            boat_number: paradePosition, // For legacy compatibility
+            name: data['Naam'] || data['Organisatie/Boot'] || `Boot ${paradePosition}`,
+            description: data['Thema/Korte beschrijving'] || `Pride Boot ${paradePosition}`,
+            status: 'registered',
+            organisation: data['Organisatie/Boot'],
+            theme: data['Thema/Korte beschrijving']
+          };
+
+        } else if (isKPNTrackersCSV) {
+          // Handle KPN trackers CSV format (existing logic)
+          const boatNumber = parseInt(data['Name']);
+          if (isNaN(boatNumber)) {
+            errors++;
+            errorDetails.push(`Row ${i}: Invalid tracker name in Name field: ${data['Name']}`);
+            continue;
+          }
+
+          boatData = {
+            boat_number: boatNumber,
+            name: `KPN Tracker ${boatNumber}`,
+            description: data['Description'] || `KPN Tracked Device ${boatNumber}`,
+            status: 'waiting',
+            asset_code: data['Asset Code'],
+            asset_type: data['Asset Type'] || 'Boat',
+            device_type: data['Device Type'],
+            serial_number: data['Serial Number'],
+            enabled: data['Enabled'] === 'Enabled',
+            current_status: data['Current Status']
+          };
+
+        } else {
           errors++;
-          errorDetails.push(`Row ${i}: Invalid boat number in Name field: ${data['Name']}`);
+          errorDetails.push(`Row ${i}: Unknown CSV format. Expected Pride boats or KPN trackers format.`);
           continue;
         }
-
-        // Create boat object
-        const boatData = {
-          boat_number: boatNumber,
-          name: `Pride Boat ${boatNumber}`,
-          description: data['Description'] || `KPN Tracked Boat ${boatNumber}`,
-          status: 'waiting',
-          asset_code: data['Asset Code'],
-          asset_type: data['Asset Type'] || 'Boat',
-          device_type: data['Device Type'],
-          serial_number: data['Serial Number'],
-          enabled: data['Enabled'] === 'Enabled',
-          current_status: data['Current Status']
-        };
 
         // Try to create boat
         await database.createBoat(boatData);
