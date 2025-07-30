@@ -145,37 +145,44 @@ router.post('/auto-map', async (req, res) => {
       database.getAllKPNTrackers()
     ]);
 
+    // Validatie
+    if (prideBoats.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Geen Pride boten gevonden',
+        message: 'Upload eerst je Pride CSV via de import pagina.'
+      });
+    }
+
+    if (kpnTrackers.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Geen KPN trackers gevonden',
+        message: 'Upload eerst je KPN CSV via de import pagina.'
+      });
+    }
+
     let mappingsCreated = 0;
+    let skippedTrackers = [];
     let errors = [];
 
-    // Auto-mapping logic:
-    // P1, P2, P3... -> Pride boats with parade_position 1, 2, 3...
-    // O1, O2, O3... -> Pride boats with parade_position starting from next available
-    // R1, R2, R3... -> Reserve trackers (no auto-mapping)
+    // Filter alleen P-nummers (P1, P2, P3, etc.) - negeer O en R nummers
+    const pTrackers = kpnTrackers.filter(tracker =>
+      tracker.asset_code &&
+      tracker.asset_code.startsWith('P') &&
+      /^P\d+$/.test(tracker.asset_code)
+    );
 
-    for (const tracker of kpnTrackers) {
+    logger.info(`Auto-mapping: Found ${pTrackers.length} P-trackers out of ${kpnTrackers.length} total trackers`);
+
+    for (const tracker of pTrackers) {
       try {
         const assetCode = tracker.asset_code;
-        if (!assetCode) continue;
+        // Extract position number from asset code (P1 -> 1, P2 -> 2, etc.)
+        const position = parseInt(assetCode.substring(1));
 
-        let targetBoat = null;
-
-        if (assetCode.startsWith('P')) {
-          // Pride boats: P1 -> position 1, P2 -> position 2, etc.
-          const position = parseInt(assetCode.substring(1));
-          if (!isNaN(position)) {
-            targetBoat = prideBoats.find(boat => boat.parade_position === position);
-          }
-        } else if (assetCode.startsWith('O')) {
-          // Organization boats: O1 -> next available position after Pride boats
-          const orgNumber = parseInt(assetCode.substring(1));
-          if (!isNaN(orgNumber)) {
-            const maxPridePosition = Math.max(...prideBoats.map(b => b.parade_position || 0));
-            const targetPosition = maxPridePosition + orgNumber;
-            targetBoat = prideBoats.find(boat => boat.parade_position === targetPosition);
-          }
-        }
-        // R1, R2, etc. are reserve trackers - no auto-mapping
+        // Find Pride boat with matching position (P1 -> boot positie 1)
+        const targetBoat = prideBoats.find(boat => boat.parade_position === position);
 
         if (targetBoat) {
           // Check if boat is already mapped
@@ -188,24 +195,43 @@ router.post('/auto-map', async (req, res) => {
             await database.createBoatTrackerMapping({
               pride_boat_id: targetBoat.id,
               kpn_tracker_id: tracker.id,
-              notes: `Auto-mapped: ${assetCode} -> Position ${targetBoat.parade_position}`,
+              notes: `Auto-mapped: ${assetCode} -> ${targetBoat.name} (positie ${position})`,
               is_active: true
             });
 
             mappingsCreated++;
+            logger.info(`Mapped ${assetCode} to boat ${targetBoat.name} (position ${position})`);
+          } else {
+            skippedTrackers.push(`${assetCode} (boot al gekoppeld)`);
           }
+        } else {
+          skippedTrackers.push(`${assetCode} (geen boot gevonden op positie ${position})`);
         }
       } catch (error) {
-        errors.push(`Failed to map ${tracker.asset_code}: ${error.message}`);
+        errors.push(`${tracker.asset_code}: ${error.message}`);
+        logger.error(`Error mapping ${tracker.asset_code}:`, error);
       }
+    }
+
+    // Bouw feedback bericht
+    let message = `✅ ${mappingsCreated} automatische koppelingen gemaakt van ${pTrackers.length} P-trackers`;
+    if (skippedTrackers.length > 0) {
+      message += `\n⚠️ ${skippedTrackers.length} overgeslagen: ${skippedTrackers.join(', ')}`;
+    }
+    if (errors.length > 0) {
+      message += `\n❌ ${errors.length} fouten opgetreden`;
     }
 
     res.json({
       success: true,
-      message: `Auto-mapping completed. Created ${mappingsCreated} mappings.`,
+      message,
       data: {
         mappings_created: mappingsCreated,
-        errors: errors
+        total_p_trackers: pTrackers.length,
+        skipped: skippedTrackers.length,
+        errors: errors.length,
+        skipped_details: skippedTrackers,
+        error_details: errors
       }
     });
   } catch (error) {
@@ -213,7 +239,7 @@ router.post('/auto-map', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Auto-mapping failed',
-      message: error.message
+      message: 'Fout bij automatische koppeling: ' + error.message
     });
   }
 });
@@ -237,47 +263,137 @@ router.get('/cms', (req, res) => {
         <div class="bg-white rounded-lg shadow-lg p-6">
             <h1 class="text-3xl font-bold text-gray-800 mb-6">🏳️‍🌈 PrideSync Device Management</h1>
 
-            <!-- Statistics Dashboard -->
-            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-                <div class="bg-blue-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-blue-600" x-text="stats.total_pride_boats"></div>
-                    <div class="text-sm text-gray-600">Pride Boats</div>
+            <!-- Setup Instructions -->
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6 mb-8">
+                <h2 class="text-xl font-semibold text-blue-800 mb-4">📋 Setup Instructies</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="text-center">
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div class="text-3xl mb-2">1️⃣</div>
+                            <h3 class="font-semibold text-gray-800 mb-2">Upload Pride CSV</h3>
+                            <p class="text-sm text-gray-600 mb-3">Upload je Pride boten CSV met boot nummers 0-16</p>
+                            <a href="https://pride-sync-demo-frontend-2025.vercel.app/admin/import" target="_blank"
+                               class="inline-block bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                                📤 Ga naar Import
+                            </a>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div class="text-3xl mb-2">2️⃣</div>
+                            <h3 class="font-semibold text-gray-800 mb-2">Upload KPN CSV</h3>
+                            <p class="text-sm text-gray-600 mb-3">Upload je KPN trackers CSV met P1-P16 asset codes</p>
+                            <a href="https://pride-sync-demo-frontend-2025.vercel.app/admin/import" target="_blank"
+                               class="inline-block bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700">
+                                📤 Ga naar Import
+                            </a>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <div class="bg-white rounded-lg p-4 shadow-sm">
+                            <div class="text-3xl mb-2">3️⃣</div>
+                            <h3 class="font-semibold text-gray-800 mb-2">Auto-Koppeling</h3>
+                            <p class="text-sm text-gray-600 mb-3">P1→Boot 1, P2→Boot 2, etc. automatisch koppelen</p>
+                            <button @click="autoMap()"
+                                    class="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700">
+                                🤖 Start Auto-Mapping
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="bg-green-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-green-600" x-text="stats.total_kpn_trackers"></div>
-                    <div class="text-sm text-gray-600">KPN Trackers</div>
+            </div>
+
+            <!-- Status Dashboard -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <div class="text-2xl font-bold text-blue-600" x-text="stats.total_pride_boats || 0"></div>
+                    <div class="text-sm text-gray-600">Pride Boten Geüpload</div>
+                    <div class="text-xs text-gray-500 mt-1" x-show="stats.total_pride_boats === 0">Upload eerst je Pride CSV</div>
                 </div>
-                <div class="bg-purple-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-purple-600" x-text="stats.active_mappings"></div>
-                    <div class="text-sm text-gray-600">Active Mappings</div>
+                <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                    <div class="text-2xl font-bold text-green-600" x-text="stats.total_kpn_trackers || 0"></div>
+                    <div class="text-sm text-gray-600">KPN Trackers Geüpload</div>
+                    <div class="text-xs text-gray-500 mt-1" x-show="stats.total_kpn_trackers === 0">Upload eerst je KPN CSV</div>
                 </div>
-                <div class="bg-yellow-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-yellow-600" x-text="stats.unmapped_boats"></div>
-                    <div class="text-sm text-gray-600">Unmapped Boats</div>
+                <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                    <div class="text-2xl font-bold text-purple-600" x-text="stats.active_mappings || 0"></div>
+                    <div class="text-sm text-gray-600">Actieve Koppelingen</div>
+                    <div class="text-xs text-gray-500 mt-1" x-show="stats.active_mappings === 0">Nog geen koppelingen</div>
                 </div>
-                <div class="bg-indigo-50 p-4 rounded-lg">
-                    <div class="text-2xl font-bold text-indigo-600" x-text="stats.mapping_percentage + '%'"></div>
-                    <div class="text-sm text-gray-600">Mapped</div>
+                <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-200">
+                    <div class="text-2xl font-bold text-indigo-600" x-text="(stats.mapping_percentage || 0) + '%'"></div>
+                    <div class="text-sm text-gray-600">Voltooid</div>
+                    <div class="text-xs text-gray-500 mt-1" x-show="stats.mapping_percentage === 0">Start met auto-mapping</div>
                 </div>
             </div>
 
             <!-- Auto-mapping Section -->
-            <div class="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 mb-8">
-                <h2 class="text-xl font-semibold mb-4">🤖 Automatic Mapping</h2>
-                <p class="text-gray-600 mb-4">Automatically map KPN trackers to Pride boats based on asset codes:</p>
-                <ul class="text-sm text-gray-600 mb-4">
-                    <li>• <strong>P1, P2, P3...</strong> → Pride boats at parade positions 1, 2, 3...</li>
-                    <li>• <strong>O1, O2, O3...</strong> → Organization boats at next available positions</li>
-                    <li>• <strong>R1, R2, R3...</strong> → Reserve trackers (no auto-mapping)</li>
-                </ul>
-                <button @click="autoMap()" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-md hover:from-blue-700 hover:to-purple-700">
-                    🚀 Start Auto-Mapping
+            <div class="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-6 mb-8">
+                <h2 class="text-xl font-semibold text-purple-800 mb-4">🤖 Automatische Koppeling</h2>
+                <div class="bg-white rounded-lg p-4 mb-4 border border-purple-100">
+                    <p class="text-gray-700 mb-3">
+                        <strong>Hoe werkt het:</strong> De auto-mapping koppelt alleen P-nummers uit je KPN CSV aan Pride boten:
+                    </p>
+                    <ul class="text-sm text-gray-600 mb-3 space-y-1">
+                        <li>• <strong>P1</strong> → Pride boot op positie <strong>1</strong></li>
+                        <li>• <strong>P2</strong> → Pride boot op positie <strong>2</strong></li>
+                        <li>• <strong>P3</strong> → Pride boot op positie <strong>3</strong></li>
+                        <li>• <em>etc...</em></li>
+                    </ul>
+                    <div class="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                        <strong>Let op:</strong> O-nummers en R-nummers worden genegeerd zoals je hebt gevraagd.
+                    </div>
+                </div>
+                <button @click="autoMap()"
+                        class="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-2 rounded-md hover:from-purple-700 hover:to-indigo-700 font-medium">
+                    🚀 Start Automatische Koppeling
                 </button>
+            </div>
+
+            <!-- Data Overview Section -->
+            <div class="bg-white border border-gray-200 rounded-lg p-6 mb-8" x-show="data.pride_boats.length > 0 || data.kpn_trackers.length > 0">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">📊 Geüploade Data</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Pride Boats -->
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <h3 class="font-semibold text-blue-800 mb-3">Pride Boten (<span x-text="data.pride_boats.length"></span>)</h3>
+                        <div class="max-h-32 overflow-y-auto">
+                            <template x-for="boat in data.pride_boats.slice(0, 10)" :key="boat.id">
+                                <div class="text-sm text-gray-600 py-1">
+                                    <span class="font-medium" x-text="'Positie ' + boat.parade_position"></span>:
+                                    <span x-text="boat.name"></span>
+                                </div>
+                            </template>
+                            <div x-show="data.pride_boats.length > 10" class="text-xs text-gray-500 mt-2">
+                                ... en <span x-text="data.pride_boats.length - 10"></span> meer
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KPN Trackers -->
+                    <div class="bg-green-50 rounded-lg p-4">
+                        <h3 class="font-semibold text-green-800 mb-3">KPN Trackers (<span x-text="data.kpn_trackers.length"></span>)</h3>
+                        <div class="max-h-32 overflow-y-auto">
+                            <template x-for="tracker in data.kpn_trackers.filter(t => t.asset_code && t.asset_code.startsWith('P')).slice(0, 10)" :key="tracker.id">
+                                <div class="text-sm text-gray-600 py-1">
+                                    <span class="font-medium" x-text="tracker.asset_code"></span>:
+                                    <span x-text="tracker.name || tracker.serial_number"></span>
+                                </div>
+                            </template>
+                            <div x-show="data.kpn_trackers.filter(t => t.asset_code && t.asset_code.startsWith('P')).length > 10" class="text-xs text-gray-500 mt-2">
+                                ... en meer P-trackers
+                            </div>
+                            <div x-show="data.kpn_trackers.filter(t => t.asset_code && (t.asset_code.startsWith('O') || t.asset_code.startsWith('R'))).length > 0" class="text-xs text-gray-400 mt-2">
+                                + <span x-text="data.kpn_trackers.filter(t => t.asset_code && (t.asset_code.startsWith('O') || t.asset_code.startsWith('R'))).length"></span> O/R-trackers (worden genegeerd)
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Manual Mapping Section -->
             <div class="bg-gray-50 rounded-lg p-6 mb-8">
-                <h2 class="text-xl font-semibold mb-4">Manual Mapping</h2>
+                <h2 class="text-xl font-semibold mb-4">🔧 Handmatige Koppeling</h2>
                 <form @submit.prevent="createMapping()" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Pride Boat</label>
@@ -409,6 +525,9 @@ router.get('/cms', (req, res) => {
 
                 async autoMap() {
                     try {
+                        // Toon loading state
+                        const loadingAlert = '🤖 Bezig met automatische koppeling van P-trackers...\n\nDit kan even duren.';
+
                         const response = await fetch('/api/device-management/auto-map', {
                             method: 'POST',
                             headers: {
@@ -418,15 +537,41 @@ router.get('/cms', (req, res) => {
 
                         const result = await response.json();
                         if (result.success) {
-                            alert(result.message);
+                            // Bouw gedetailleerd resultaat bericht
+                            let message = result.message;
+
+                            if (result.data) {
+                                const { mappings_created, total_p_trackers, skipped, errors, skipped_details } = result.data;
+
+                                message += `\n\n📊 Gedetailleerd resultaat:`;
+                                message += `\n✅ ${mappings_created} van ${total_p_trackers} P-trackers succesvol gekoppeld`;
+
+                                if (skipped > 0) {
+                                    message += `\n⚠️ ${skipped} overgeslagen:`;
+                                    skipped_details.slice(0, 5).forEach(detail => {
+                                        message += `\n   • ${detail}`;
+                                    });
+                                    if (skipped_details.length > 5) {
+                                        message += `\n   • ... en ${skipped_details.length - 5} meer`;
+                                    }
+                                }
+
+                                if (errors > 0) {
+                                    message += `\n❌ ${errors} fouten opgetreden`;
+                                }
+
+                                message += `\n\n💡 Tip: Ga naar de import pagina om CSV bestanden te uploaden als je nog geen data hebt.`;
+                            }
+
+                            alert(message);
                             await this.loadData();
                             await this.loadStats();
                         } else {
-                            alert('Error: ' + result.error);
+                            alert('❌ Fout: ' + (result.message || result.error));
                         }
                     } catch (error) {
                         console.error('Error in auto-mapping:', error);
-                        alert('Error in auto-mapping');
+                        alert('❌ Fout tijdens auto-mapping: ' + error.message);
                     }
                 },
 
