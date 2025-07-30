@@ -5,11 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 // Simple icon replacements to avoid external dependencies
-const RefreshCw = () => <span>🔄</span>;
-const Activity = () => <span>📊</span>;
-const Clock = () => <span>⏰</span>;
-const Globe = () => <span>🌐</span>;
-const AlertCircle = () => <span>⚠️</span>;
+const RefreshCw = ({ className }: { className?: string }) => <span className={className}>🔄</span>;
+const Activity = ({ className }: { className?: string }) => <span className={className}>📊</span>;
+const Clock = ({ className }: { className?: string }) => <span className={className}>⏰</span>;
+const Globe = ({ className }: { className?: string }) => <span className={className}>🌐</span>;
+const AlertCircle = ({ className }: { className?: string }) => <span className={className}>⚠️</span>;
 
 interface WebhookLog {
   id: number;
