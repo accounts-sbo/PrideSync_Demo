@@ -4,7 +4,12 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Activity, Clock, Globe, AlertCircle } from 'lucide-react';
+// Simple icon replacements to avoid external dependencies
+const RefreshCw = () => <span>🔄</span>;
+const Activity = () => <span>📊</span>;
+const Clock = () => <span>⏰</span>;
+const Globe = () => <span>🌐</span>;
+const AlertCircle = () => <span>⚠️</span>;
 
 interface WebhookLog {
   id: number;
