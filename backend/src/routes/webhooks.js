@@ -331,15 +331,50 @@ router.post('/kpn-gps', async (req, res) => {
       accuracy: accuracy || null
     };
 
-    // Save to database
+    // Save to database (mapped boats)
+    if (actualBoatNumber) {
+      try {
+        await database.saveBoatPosition(actualBoatNumber, {
+          ...positionData,
+          imei: boat.imei
+        });
+      } catch (dbError) {
+        logger.error('Failed to save position to database:', dbError);
+        // Continue processing even if database save fails
+      }
+    }
+
+    // Always save GPS data for later analysis (even unmapped devices)
     try {
-      await database.saveBoatPosition(actualBoatNumber, {
-        ...positionData,
-        imei: boat.imei
+      await database.saveGPSPosition({
+        tracker_name: deviceIMEI || `SerNo_${serNo}`,
+        kpn_tracker_id: serNo || null,
+        pride_boat_id: actualBoatNumber || null,
+        parade_position: actualBoatNumber || null,
+        latitude: gpsData.latitude,
+        longitude: gpsData.longitude,
+        altitude: gpsData.altitude || null,
+        accuracy: gpsData.accuracy || null,
+        speed: gpsData.speed || null,
+        heading: gpsData.heading || null,
+        timestamp: new Date(gpsTimestamp),
+        raw_data: {
+          SerNo: serNo,
+          IMEI: deviceIMEI,
+          originalPayload: req.body
+        }
       });
-    } catch (dbError) {
-      logger.error('Failed to save position to database:', dbError);
-      // Continue processing even if database save fails
+
+      logger.info('GPS data saved for analysis:', {
+        SerNo: serNo,
+        IMEI: deviceIMEI,
+        boatNumber: actualBoatNumber || 'unmapped',
+        latitude: gpsData.latitude,
+        longitude: gpsData.longitude,
+        timestamp: gpsTimestamp
+      });
+    } catch (saveError) {
+      logger.error('Failed to save GPS data for analysis:', saveError);
     }
 
     // Update in-memory boat state
@@ -536,16 +571,40 @@ router.post('/tracker-gps', async (req, res) => {
           }
         }
 
-        // Always log the GPS data for serial tracking
-        logger.info('GPS data processed:', {
-          SerNo,
-          IMEI,
-          boatNumber: boatNumber || 'unmapped',
-          latitude,
-          longitude,
-          timestamp: timestamp.toISOString(),
-          hasRouteMapping: !!routePosition
-        });
+        // Always save GPS data for later analysis (even unmapped devices)
+        try {
+          await database.saveGPSPosition({
+            tracker_name: `SerNo_${SerNo}`,
+            kpn_tracker_id: SerNo,
+            pride_boat_id: boatNumber || null,
+            parade_position: boatNumber || null,
+            latitude,
+            longitude,
+            altitude: altitude || null,
+            accuracy: accuracy || null,
+            speed: speed || null,
+            heading: heading || null,
+            timestamp,
+            raw_data: {
+              SerNo,
+              IMEI,
+              record: record,
+              originalPayload: req.body
+            }
+          });
+
+          logger.info('GPS data saved for analysis:', {
+            SerNo,
+            IMEI,
+            boatNumber: boatNumber || 'unmapped',
+            latitude,
+            longitude,
+            timestamp: timestamp.toISOString(),
+            hasRouteMapping: !!routePosition
+          });
+        } catch (saveError) {
+          logger.error('Failed to save GPS data for analysis:', saveError);
+        }
 
         processedRecords.push({
           SeqNo: record.SeqNo,
@@ -864,6 +923,32 @@ router.get('/stats', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch webhook stats',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get Latest GPS Positions
+ * GET /api/webhooks/gps-positions
+ *
+ * Returns latest GPS positions for all tracked devices for map display
+ */
+router.get('/gps-positions', async (req, res) => {
+  try {
+    const positions = await database.getLatestGPSPositions();
+
+    res.json({
+      success: true,
+      data: positions,
+      count: positions.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching GPS positions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch GPS positions',
       message: error.message
     });
   }

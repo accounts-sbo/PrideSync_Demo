@@ -377,6 +377,99 @@ async function saveBoatPosition(boatNumber, positionData) {
 }
 
 /**
+ * Save GPS position data for analysis (all devices, mapped and unmapped)
+ */
+async function saveGPSPosition(gpsData) {
+  if (!pgPool) {
+    logger.debug('No database connection, skipping GPS position save');
+    return;
+  }
+
+  const query = `
+    INSERT INTO gps_positions (
+      tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+      latitude, longitude, altitude, accuracy, speed, heading,
+      timestamp, raw_data
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING id
+  `;
+
+  const values = [
+    gpsData.tracker_name,
+    gpsData.kpn_tracker_id,
+    gpsData.pride_boat_id,
+    gpsData.parade_position,
+    gpsData.latitude,
+    gpsData.longitude,
+    gpsData.altitude,
+    gpsData.accuracy,
+    gpsData.speed,
+    gpsData.heading,
+    gpsData.timestamp,
+    JSON.stringify(gpsData.raw_data)
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.debug(`GPS position saved for tracker ${gpsData.tracker_name}`, {
+      id: result.rows[0].id,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude
+    });
+    return result.rows[0].id;
+  } catch (error) {
+    logger.error(`Error saving GPS position for tracker ${gpsData.tracker_name}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get latest GPS positions for all tracked devices
+ */
+async function getLatestGPSPositions() {
+  if (!pgPool) {
+    logger.debug('No database connection, returning empty GPS positions');
+    return [];
+  }
+
+  const query = `
+    WITH latest_positions AS (
+      SELECT DISTINCT ON (tracker_name)
+        tracker_name,
+        kpn_tracker_id,
+        pride_boat_id,
+        parade_position,
+        latitude,
+        longitude,
+        altitude,
+        speed,
+        heading,
+        timestamp,
+        raw_data,
+        received_at
+      FROM gps_positions
+      ORDER BY tracker_name, timestamp DESC
+    )
+    SELECT
+      lp.*,
+      pb.boat_name,
+      pb.organisation
+    FROM latest_positions lp
+    LEFT JOIN pride_boats pb ON lp.pride_boat_id = pb.parade_position
+    ORDER BY lp.timestamp DESC
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    logger.debug(`Retrieved ${result.rows.length} latest GPS positions`);
+    return result.rows;
+  } catch (error) {
+    logger.error('Error getting latest GPS positions:', error);
+    throw error;
+  }
+}
+
+/**
  * Save boat incident to database
  */
 async function saveBoatIncident(boatNumber, incidentData) {
@@ -1462,6 +1555,8 @@ module.exports = {
   testConnection,
   resetDatabase,
   saveBoatPosition,
+  saveGPSPosition,
+  getLatestGPSPositions,
   saveBoatIncident,
   getBoatPositionHistory,
   cacheSet,
