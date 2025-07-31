@@ -138,6 +138,9 @@ router.post('/kpn-gps', async (req, res) => {
 
     const { bootnummer, imei, timestamp, latitude, longitude, altitude, accuracy, speed, heading } = value;
 
+    // Extract serial number if present in payload
+    const serNo = req.body.SerNo || req.body.SerialNumber || req.body.serial || null;
+
     // Determine boat identifier and get boat info from database
     let boat = null;
     let boatIdentifier = null;
@@ -150,19 +153,46 @@ router.post('/kpn-gps', async (req, res) => {
       boatIdentifier = imei;
     }
 
+    // Log GPS data even if boat not found (for serial tracking)
+    logger.info('KPN GPS data received:', {
+      bootnummer,
+      imei,
+      serNo,
+      coordinates: [latitude, longitude],
+      timestamp,
+      boatFound: !!boat
+    });
+
     if (!boat) {
-      logger.warn('GPS data received for unknown boat:', {
+      logger.warn('GPS data received for unknown boat - logging serial data:', {
         bootnummer,
         imei,
+        serNo,
         coordinates: [latitude, longitude]
       });
 
-      return res.status(404).json({
-        error: 'Boat not found',
-        message: 'No boat registered with this number or IMEI',
-        bootnummer,
-        imei,
-        coordinates: [latitude, longitude]
+      // Return success instead of error to keep KPN happy
+      return res.status(200).json({
+        success: true,
+        message: 'GPS data received and logged (boat not mapped)',
+        device: {
+          bootnummer,
+          imei,
+          serNo,
+          mapped: false
+        },
+        gpsData: {
+          timestamp,
+          coordinates: [latitude, longitude],
+          altitude,
+          accuracy,
+          speed,
+          heading
+        },
+        processed: {
+          timestamp: new Date().toISOString(),
+          processingTimeMs: Date.now() - startTime
+        }
       });
     }
 
@@ -305,31 +335,26 @@ router.post('/tracker-gps', async (req, res) => {
 
     // Get device mapping from IMEI
     const deviceMapping = await database.getDeviceMappingByIMEI(IMEI);
+    let boatNumber = null;
+
     if (!deviceMapping) {
-      logger.warn('GPS data received for unmapped device:', {
+      logger.warn('GPS data received for unmapped device - storing serial data anyway:', {
         SerNo,
         IMEI,
         recordCount: Records.length
       });
-
-      return res.status(404).json({
-        error: 'Device not mapped to any boat',
-        message: 'Please configure device mapping in CMS',
+      // Continue processing even without mapping - just log the serial data
+    } else {
+      boatNumber = deviceMapping.boat_number;
+      logger.info('GPS data received for mapped device:', {
         SerNo,
         IMEI,
+        boatNumber,
         recordCount: Records.length
       });
     }
 
-    const boatNumber = deviceMapping.boat_number;
-    const boatName = deviceMapping.boat_name;
-
-    logger.info(`GPS update received for boat ${boatNumber} (${boatName})`, {
-      SerNo,
-      IMEI,
-      boatNumber,
-      recordCount: Records.length
-    });
+    const boatName = deviceMapping?.boat_name || 'Unmapped Device';
 
     const processedRecords = [];
 
@@ -369,64 +394,87 @@ router.post('/tracker-gps', async (req, res) => {
         // Use GPS timestamp or record timestamp
         const timestamp = new Date(GpsUTC || record.DateUTC);
 
-        // Map GPS coordinates to parade route
-        const routePosition = await routeMapper.mapToRoute({
-          latitude,
-          longitude,
-          timestamp
-        });
-
-        if (!routePosition) {
-          logger.warn(`Could not map GPS position to route for boat ${boatNumber}`, {
-            boatNumber,
-            IMEI,
-            coordinates: [latitude, longitude],
-            SeqNo: record.SeqNo
-          });
-          continue;
-        }
-
-        // Prepare position data
+        // Prepare basic position data
         const positionData = {
           latitude,
           longitude,
           timestamp,
-          routeDistance: routePosition.distanceMeters,
-          routeProgress: routePosition.progressPercent,
-          speed: speed || routePosition.estimatedSpeed,
-          heading: heading || routePosition.heading,
+          speed: speed || null,
+          heading: heading || null,
           altitude: altitude || null,
-          accuracy: accuracy || null
+          accuracy: accuracy || null,
+          serNo: SerNo,
+          imei: IMEI
         };
 
-        // Save to database
-        try {
-          await database.saveBoatPosition(boatNumber, {
-            ...positionData,
-            imei: IMEI,
-            device_imei: IMEI
-          });
-        } catch (dbError) {
-          logger.error('Failed to save position to database:', dbError);
-          // Continue processing even if database save fails
+        // Try to map GPS coordinates to parade route (only if we have a boat mapping)
+        let routePosition = null;
+        if (boatNumber) {
+          try {
+            routePosition = await routeMapper.mapToRoute({
+              latitude,
+              longitude,
+              timestamp
+            });
+
+            if (routePosition) {
+              positionData.routeDistance = routePosition.distanceMeters;
+              positionData.routeProgress = routePosition.progressPercent;
+              positionData.speed = speed || routePosition.estimatedSpeed;
+              positionData.heading = heading || routePosition.heading;
+            }
+          } catch (routeError) {
+            logger.warn('Route mapping failed, continuing with basic GPS data:', routeError.message);
+          }
         }
 
-        // Update in-memory boat state
-        const updatedBoat = await boatState.updateBoatPosition(boatNumber, positionData);
+        // Save to database (only if we have a boat number)
+        if (boatNumber) {
+          try {
+            await database.saveBoatPosition(boatNumber, {
+              ...positionData,
+              device_imei: IMEI
+            });
 
-        // Trigger corridor algorithm and status updates
-        await updateBoatState(boatNumber, updatedBoat);
+            // Update in-memory boat state
+            const updatedBoat = await boatState.updateBoatPosition(boatNumber, positionData);
+
+            // Trigger corridor algorithm and status updates
+            await updateBoatState(boatNumber, updatedBoat);
+          } catch (dbError) {
+            logger.error('Failed to save position to database:', dbError);
+            // Continue processing even if database save fails
+          }
+        }
+
+        // Always log the GPS data for serial tracking
+        logger.info('GPS data processed:', {
+          SerNo,
+          IMEI,
+          boatNumber: boatNumber || 'unmapped',
+          latitude,
+          longitude,
+          timestamp: timestamp.toISOString(),
+          hasRouteMapping: !!routePosition
+        });
 
         processedRecords.push({
           SeqNo: record.SeqNo,
+          serNo: SerNo,
+          imei: IMEI,
           timestamp: timestamp.toISOString(),
           coordinates: [latitude, longitude],
-          routeProgress: routePosition.progressPercent
+          routeProgress: routePosition?.progressPercent || null,
+          boatNumber: boatNumber || null,
+          mapped: !!boatNumber
         });
 
-        logger.debug(`GPS record processed for boat ${boatNumber}`, {
+        logger.debug(`GPS record processed`, {
           SeqNo: record.SeqNo,
-          routeProgress: routePosition.progressPercent
+          SerNo,
+          IMEI,
+          boatNumber: boatNumber || 'unmapped',
+          routeProgress: routePosition?.progressPercent || null
         });
 
       } catch (recordError) {
@@ -440,22 +488,28 @@ router.post('/tracker-gps', async (req, res) => {
 
     const processingTime = Date.now() - startTime;
 
-    logger.info(`Tracker GPS update processed for boat ${boatNumber}`, {
-      boatNumber,
-      boatName,
+    logger.info(`Tracker GPS update processed`, {
+      SerNo,
       IMEI,
+      boatNumber: boatNumber || 'unmapped',
+      boatName,
       totalRecords: Records.length,
       processedRecords: processedRecords.length,
-      processingTimeMs: processingTime
+      processingTimeMs: processingTime,
+      mapped: !!boatNumber
     });
 
-    // Return success response
+    // Always return success response (even for unmapped devices)
     res.status(200).json({
       success: true,
-      boatNumber,
-      boatName,
-      IMEI,
-      SerNo,
+      message: boatNumber ? 'GPS data processed and mapped to boat' : 'GPS data received and logged (device not mapped)',
+      device: {
+        SerNo,
+        IMEI,
+        mapped: !!boatNumber,
+        boatNumber: boatNumber || null,
+        boatName: boatName || null
+      },
       processed: {
         timestamp: new Date().toISOString(),
         totalRecords: Records.length,
