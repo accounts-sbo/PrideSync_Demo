@@ -79,7 +79,21 @@ const gpsPayloadSchema = Joi.object({
   ICCID: Joi.string().optional(),
   ProdId: Joi.number().optional(),
   FW: Joi.string().optional(),
-  Records: Joi.array().items(Joi.object().unknown(true)).optional()
+  Records: Joi.array().items(Joi.object({
+    SeqNo: Joi.number().optional(),
+    Reason: Joi.number().optional(),
+    DateUTC: Joi.string().isoDate().optional(),
+    Fields: Joi.array().items(Joi.object({
+      FType: Joi.number().optional(),
+      Lat: Joi.number().optional(),
+      Long: Joi.number().optional(),
+      Alt: Joi.number().optional(),
+      Speed: Joi.number().optional(),
+      Course: Joi.number().optional(),
+      Sat: Joi.number().optional(),
+      HDOP: Joi.number().optional()
+    }).unknown(true)).optional()
+  }).unknown(true)).optional()
 }).unknown(true); // Allow unknown fields for flexibility
 
 // Flexible validation schema for tracker device webhook format
@@ -111,9 +125,7 @@ const trackerPayloadSchema = Joi.object({
           DIn: Joi.number().optional(),
           DOut: Joi.number().optional(),
           DevStat: Joi.number().optional(),
-          AnalogueData: Joi.object().optional(),
-          // Allow any additional fields that KPN might send
-          ...Joi.object().pattern(Joi.string(), Joi.any()).optional()
+          AnalogueData: Joi.object().optional()
         }).unknown(true) // Allow unknown fields
       ).optional() // Made optional in case Records structure varies
     }).unknown(true) // Allow unknown fields at record level
