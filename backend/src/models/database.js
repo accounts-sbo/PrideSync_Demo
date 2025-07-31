@@ -1318,7 +1318,11 @@ async function getKPNTrackerByName(trackerName) {
  * Webhook Logging Functions
  */
 async function logWebhookRequest(webhookData) {
+  logger.info(`logWebhookRequest called for: ${webhookData.method} ${webhookData.endpoint}`);
+
   if (!pgPool) {
+    logger.info('Using in-memory webhook logging (no PostgreSQL connection)');
+
     // In-memory fallback
     const logEntry = {
       id: inMemoryWebhookLogs.length + 1,
@@ -1343,7 +1347,7 @@ async function logWebhookRequest(webhookData) {
       inMemoryWebhookLogs = inMemoryWebhookLogs.slice(0, 100);
     }
 
-    logger.debug(`Webhook logged (in-memory): ${webhookData.endpoint}`, { status: webhookData.response_status });
+    logger.info(`Webhook logged (in-memory): ${webhookData.endpoint}, total logs: ${inMemoryWebhookLogs.length}`, { status: webhookData.response_status });
     return logEntry;
   }
 
@@ -1378,8 +1382,13 @@ async function logWebhookRequest(webhookData) {
 }
 
 async function getWebhookLogs(limit = 50, offset = 0) {
+  logger.info(`getWebhookLogs called: limit=${limit}, offset=${offset}`);
+
   if (!pgPool) {
-    return inMemoryWebhookLogs.slice(offset, offset + limit);
+    logger.info(`Returning in-memory logs: ${inMemoryWebhookLogs.length} total logs`);
+    const result = inMemoryWebhookLogs.slice(offset, offset + limit);
+    logger.info(`Returning ${result.length} logs from in-memory storage`);
+    return result;
   }
 
   const query = `

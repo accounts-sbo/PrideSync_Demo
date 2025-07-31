@@ -37,6 +37,8 @@ async function logWebhookMiddleware(req, res, next) {
     const processingTime = Date.now() - startTime;
 
     try {
+      logger.info(`Logging webhook request: ${req.method} ${req.path} - Status: ${responseStatus || res.statusCode}`);
+
       await database.logWebhookRequest({
         endpoint: req.path,
         method: req.method,
@@ -50,8 +52,11 @@ async function logWebhookMiddleware(req, res, next) {
         processing_time_ms: processingTime,
         error_message: null
       });
+
+      logger.info(`Webhook request logged successfully: ${req.method} ${req.path}`);
     } catch (error) {
       logger.error('Failed to log webhook request:', error);
+      logger.error('Error details:', error.message);
     }
   });
 }
