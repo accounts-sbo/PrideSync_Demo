@@ -195,19 +195,31 @@ router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
       gpsTimestamp = gpsTimestamp || record.DateUTC;
 
       if (record.Fields && Array.isArray(record.Fields)) {
-        // Find GPS field (FType 0 is usually GPS)
-        const gpsField = record.Fields.find(field => field.FType === 0 && field.Lat && field.Long) ||
-                        record.Fields.find(field => field.Lat && field.Long);
+        // Find GPS field (FType 0 or 1 is usually GPS, support both Long and Lng)
+        const gpsField = record.Fields.find(field =>
+          (field.FType === 0 || field.FType === 1) &&
+          field.Lat && (field.Long || field.Lng)
+        ) || record.Fields.find(field =>
+          field.Lat && (field.Long || field.Lng)
+        );
 
         if (gpsField) {
           gpsData = {
             latitude: gpsField.Lat,
-            longitude: gpsField.Long,
+            longitude: gpsField.Long || gpsField.Lng,
             altitude: gpsField.Alt || altitude,
             accuracy: gpsField.Acc || accuracy,
             speed: gpsField.Speed || speed,
             heading: gpsField.Course || heading
           };
+
+          logger.info('🎯 GPS coordinates extracted from Records:', {
+            latitude: gpsData.latitude,
+            longitude: gpsData.longitude,
+            FType: gpsField.FType
+          });
+        } else {
+          logger.warn('❌ No GPS field found in Records.Fields:', record.Fields);
         }
       }
     } else if (latitude && longitude) {
