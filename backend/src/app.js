@@ -16,6 +16,9 @@ const votingRoutes = require('./routes/voting');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy for Railway deployment (fixes X-Forwarded-For warnings)
+app.set('trust proxy', true);
+
 // Security middleware
 app.use(helmet());
 app.use(cors({
