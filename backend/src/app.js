@@ -50,8 +50,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
-app.get('/health', async (req, res) => {
+// Simple health check for Railway deployment
+app.get('/health', (req, res) => {
+  // Always return 200 OK immediately - no async operations
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
+    uptime: process.uptime(),
+    server: 'running'
+  });
+});
+
+// Detailed health check with database status
+app.get('/health/detailed', async (req, res) => {
   try {
     // Check database connectivity
     let dbStatus = 'unknown';
@@ -71,7 +84,7 @@ app.get('/health', async (req, res) => {
       uptime: process.uptime()
     });
   } catch (error) {
-    logger.error('Health check error:', error);
+    logger.error('Detailed health check error:', error);
     res.status(500).json({
       status: 'ERROR',
       timestamp: new Date().toISOString(),
