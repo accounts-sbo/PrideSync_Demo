@@ -50,7 +50,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ultra-simple health check for Railway deployment
+// Ultra-simple health check for Railway deployment - updated for KPN support
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
