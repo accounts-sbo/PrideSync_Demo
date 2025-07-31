@@ -72,17 +72,18 @@ const gpsPayloadSchema = Joi.object({
   heading: Joi.number().min(0).max(360).optional()
 }).or('bootnummer', 'imei'); // At least one of bootnummer or imei is required
 
-// Validation schema for tracker device webhook format
+// Flexible validation schema for tracker device webhook format
+// Accepts real KPN data with various field combinations
 const trackerPayloadSchema = Joi.object({
   SerNo: Joi.number().integer().required(),
-  IMEI: Joi.string().length(15).pattern(/^\d+$/).required(),
+  IMEI: Joi.string().min(10).max(20).required(), // More flexible IMEI length
   ICCID: Joi.string().optional(),
   ProdId: Joi.number().integer().optional(),
   FW: Joi.string().optional(),
   Records: Joi.array().items(
     Joi.object({
-      SeqNo: Joi.number().integer().required(),
-      Reason: Joi.number().integer().required(),
+      SeqNo: Joi.number().integer().optional(), // Made optional
+      Reason: Joi.number().integer().optional(), // Made optional
       DateUTC: Joi.string().required(),
       Fields: Joi.array().items(
         Joi.object({
@@ -96,16 +97,18 @@ const trackerPayloadSchema = Joi.object({
           PDOP: Joi.number().optional(),
           PosAcc: Joi.number().optional(),
           GpsStat: Joi.number().optional(),
-          FType: Joi.number().integer().required(),
+          FType: Joi.number().integer().optional(), // Made optional
           DIn: Joi.number().optional(),
           DOut: Joi.number().optional(),
           DevStat: Joi.number().optional(),
-          AnalogueData: Joi.object().optional()
-        })
-      ).required()
-    })
+          AnalogueData: Joi.object().optional(),
+          // Allow any additional fields that KPN might send
+          ...Joi.object().pattern(Joi.string(), Joi.any()).optional()
+        }).unknown(true) // Allow unknown fields
+      ).optional() // Made optional in case Records structure varies
+    }).unknown(true) // Allow unknown fields at record level
   ).required()
-});
+}).unknown(true); // Allow unknown fields at top level
 
 /**
  * KPN GPS Webhook Endpoint
@@ -333,11 +336,31 @@ router.post('/tracker-gps', async (req, res) => {
     // Process each GPS record
     for (const record of Records) {
       try {
-        // Find GPS field (FType = 0)
-        const gpsField = record.Fields.find(field => field.FType === 0);
+        // Find GPS field - try multiple methods for flexibility
+        let gpsField = null;
+
+        if (record.Fields && Array.isArray(record.Fields)) {
+          // Method 1: Find GPS data by FType 0
+          gpsField = record.Fields.find(field => field.FType === 0);
+
+          // Method 2: Find any field with Lat/Long if FType method fails
+          if (!gpsField || !gpsField.Lat || !gpsField.Long) {
+            gpsField = record.Fields.find(field => field.Lat && field.Long);
+          }
+        }
+
+        // Method 3: Check if GPS data is directly in the record
+        if (!gpsField && record.Lat && record.Long) {
+          gpsField = record;
+        }
 
         if (!gpsField || !gpsField.Lat || !gpsField.Long) {
-          logger.debug('Record without valid GPS data skipped', { SeqNo: record.SeqNo });
+          logger.debug('Record without valid GPS data skipped', {
+            SeqNo: record.SeqNo,
+            hasFields: !!record.Fields,
+            fieldsCount: record.Fields?.length || 0,
+            recordKeys: Object.keys(record)
+          });
           continue;
         }
 
@@ -512,6 +535,136 @@ async function notifyFrontend(bootId, statusData) {
   // For now, data is available via API endpoints
   logger.debug(`Status update ready for boat ${bootId}`, statusData);
 }
+
+/**
+ * KPN Serial Data Webhook Endpoint
+ * POST /api/webhooks/kpn-serial
+ *
+ * Simplified endpoint for KPN serial data with minimal validation
+ * Accepts any JSON payload and extracts GPS data flexibly
+ */
+router.post('/kpn-serial', async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    logger.info('KPN Serial webhook received:', {
+      body: req.body,
+      headers: req.headers,
+      ip: req.ip
+    });
+
+    // Very basic validation - just check if we have some data
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({
+        error: 'Invalid payload - expected JSON object',
+        received: req.body
+      });
+    }
+
+    const payload = req.body;
+    let processedRecords = [];
+
+    // Extract SerNo/IMEI for identification
+    const serNo = payload.SerNo || payload.SerialNumber || payload.serial;
+    const imei = payload.IMEI || payload.imei;
+
+    logger.info('Processing KPN serial data:', { serNo, imei });
+
+    // Try to extract GPS data from various possible structures
+    let records = [];
+
+    if (payload.Records && Array.isArray(payload.Records)) {
+      records = payload.Records;
+    } else if (payload.records && Array.isArray(payload.records)) {
+      records = payload.records;
+    } else if (payload.data && Array.isArray(payload.data)) {
+      records = payload.data;
+    } else if (payload.Lat && payload.Long) {
+      // Single GPS record
+      records = [payload];
+    }
+
+    for (const record of records) {
+      try {
+        let lat = null, lng = null, timestamp = null;
+
+        // Try different ways to extract GPS coordinates
+        if (record.Lat && record.Long) {
+          lat = record.Lat;
+          lng = record.Long;
+        } else if (record.latitude && record.longitude) {
+          lat = record.latitude;
+          lng = record.longitude;
+        } else if (record.Fields && Array.isArray(record.Fields)) {
+          for (const field of record.Fields) {
+            if (field.Lat && field.Long) {
+              lat = field.Lat;
+              lng = field.Long;
+              break;
+            }
+          }
+        }
+
+        // Try different timestamp formats
+        timestamp = record.GpsUTC || record.DateUTC || record.timestamp || record.time || new Date().toISOString();
+
+        if (lat && lng) {
+          processedRecords.push({
+            latitude: lat,
+            longitude: lng,
+            timestamp: timestamp,
+            serNo: serNo,
+            imei: imei,
+            rawRecord: record
+          });
+
+          logger.info('GPS data extracted:', {
+            serNo,
+            imei,
+            lat,
+            lng,
+            timestamp
+          });
+        }
+      } catch (recordError) {
+        logger.warn('Error processing record:', recordError);
+      }
+    }
+
+    const processingTime = Date.now() - startTime;
+
+    // Return success response
+    res.status(200).json({
+      success: true,
+      message: 'KPN serial data received',
+      serNo,
+      imei,
+      processed: {
+        timestamp: new Date().toISOString(),
+        totalRecords: records.length,
+        processedRecords: processedRecords.length,
+        processingTimeMs: processingTime
+      },
+      gpsData: processedRecords,
+      debug: {
+        originalPayload: payload
+      }
+    });
+
+  } catch (error) {
+    logger.error('Error processing KPN serial webhook:', {
+      error: error.message,
+      stack: error.stack,
+      payload: req.body
+    });
+
+    res.status(500).json({
+      error: 'Internal server error processing KPN serial data',
+      timestamp: new Date().toISOString(),
+      details: error.message
+    });
+  }
+});
 
 /**
  * Get Webhook Logs
