@@ -326,20 +326,32 @@ export default function WebhooksPage() {
         <Card className="bg-gray-800 border-gray-700">
           <CardHeader>
             <CardTitle className="text-white">🔗 Webhook URLs for KPN</CardTitle>
+            <p className="text-gray-400 text-sm mt-2">
+              Gebruik deze URLs om KPN GPS data te ontvangen van serials: 1326954, 1326997, 1327047, 1422639, 1422666, 1424486, 1424487, 1424489, 1424493, 1424494, 1424653, 1424670, 1424671, 1424678, 1424679
+            </p>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="space-y-3">
+              <div className="bg-purple-900 border border-purple-700 p-4 rounded">
+                <p className="font-semibold mb-2 text-purple-200">🎯 KPN Serial Data (Aanbevolen):</p>
+                <code className="bg-gray-900 text-green-400 p-2 rounded border border-gray-600 block text-sm">
+                  POST https://pridesyncdemo-production.up.railway.app/api/webhooks/kpn-serial
+                </code>
+                <p className="text-xs text-purple-300 mt-2">✅ Flexibele validatie voor echte KPN data</p>
+              </div>
               <div className="bg-blue-900 border border-blue-700 p-4 rounded">
-                <p className="font-semibold mb-2 text-blue-200">KPN GPS Webhook:</p>
-                <code className="bg-gray-900 text-green-400 p-2 rounded border border-gray-600 block">
+                <p className="font-semibold mb-2 text-blue-200">KPN GPS Webhook (Legacy):</p>
+                <code className="bg-gray-900 text-green-400 p-2 rounded border border-gray-600 block text-sm">
                   POST https://pridesyncdemo-production.up.railway.app/api/webhooks/kpn-gps
                 </code>
+                <p className="text-xs text-blue-300 mt-2">Voor eenvoudige GPS payloads</p>
               </div>
               <div className="bg-green-900 border border-green-700 p-4 rounded">
                 <p className="font-semibold mb-2 text-green-200">Tracker GPS Webhook:</p>
-                <code className="bg-gray-900 text-green-400 p-2 rounded border border-gray-600 block">
+                <code className="bg-gray-900 text-green-400 p-2 rounded border border-gray-600 block text-sm">
                   POST https://pridesyncdemo-production.up.railway.app/api/webhooks/tracker-gps
                 </code>
+                <p className="text-xs text-green-300 mt-2">Voor gestructureerde tracker data</p>
               </div>
             </div>
           </CardContent>
