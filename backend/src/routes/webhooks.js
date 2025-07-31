@@ -59,20 +59,27 @@ async function logWebhookMiddleware(req, res, next) {
 // Apply logging middleware to all webhook routes
 router.use(logWebhookMiddleware);
 
-// Enhanced validation schema for KPN GPS webhook
+// Enhanced validation schema for KPN GPS webhook - flexible for different formats
 const gpsPayloadSchema = Joi.object({
   bootnummer: Joi.number().integer().min(1).max(999).optional(),
   imei: Joi.string().min(10).max(20).optional(), // More flexible IMEI
+  IMEI: Joi.string().min(10).max(20).optional(), // KPN uses uppercase IMEI
   SerNo: Joi.number().integer().optional(), // Allow SerNo for tracking
   SerialNumber: Joi.number().integer().optional(), // Alternative serial field
   serial: Joi.number().integer().optional(), // Another alternative
-  timestamp: Joi.string().isoDate().required(),
-  latitude: Joi.number().min(-90).max(90).required(),
-  longitude: Joi.number().min(-180).max(180).required(),
+  timestamp: Joi.string().isoDate().optional(), // Optional for simple format
+  DateUTC: Joi.string().isoDate().optional(), // KPN uses DateUTC
+  latitude: Joi.number().min(-90).max(90).optional(), // Optional for KPN format
+  longitude: Joi.number().min(-180).max(180).optional(), // Optional for KPN format
   altitude: Joi.number().optional(),
   accuracy: Joi.number().min(0).optional(),
   speed: Joi.number().min(0).optional(),
-  heading: Joi.number().min(0).max(360).optional()
+  heading: Joi.number().min(0).max(360).optional(),
+  // KPN specific fields
+  ICCID: Joi.string().optional(),
+  ProdId: Joi.number().optional(),
+  FW: Joi.string().optional(),
+  Records: Joi.array().items(Joi.object().unknown(true)).optional()
 }).unknown(true); // Allow unknown fields for flexibility
 
 // Flexible validation schema for tracker device webhook format
@@ -139,10 +146,60 @@ router.post('/kpn-gps', async (req, res) => {
       });
     }
 
-    const { bootnummer, imei, timestamp, latitude, longitude, altitude, accuracy, speed, heading } = value;
+    // Extract data from payload - handle both simple and KPN formats
+    const { bootnummer, imei, IMEI, timestamp, DateUTC, latitude, longitude, altitude, accuracy, speed, heading, Records } = value;
 
     // Extract serial number if present in payload
     const serNo = req.body.SerNo || req.body.SerialNumber || req.body.serial || null;
+
+    // Use IMEI or imei (KPN uses uppercase)
+    const deviceIMEI = IMEI || imei;
+
+    // Extract GPS data from KPN Records format or direct fields
+    let gpsData = null;
+    let gpsTimestamp = timestamp || DateUTC;
+
+    if (Records && Array.isArray(Records) && Records.length > 0) {
+      // KPN format: extract from Records array
+      const record = Records[0]; // Use first record
+      gpsTimestamp = gpsTimestamp || record.DateUTC;
+
+      if (record.Fields && Array.isArray(record.Fields)) {
+        // Find GPS field (FType 0 is usually GPS)
+        const gpsField = record.Fields.find(field => field.FType === 0 && field.Lat && field.Long) ||
+                        record.Fields.find(field => field.Lat && field.Long);
+
+        if (gpsField) {
+          gpsData = {
+            latitude: gpsField.Lat,
+            longitude: gpsField.Long,
+            altitude: gpsField.Alt || altitude,
+            accuracy: gpsField.Acc || accuracy,
+            speed: gpsField.Speed || speed,
+            heading: gpsField.Course || heading
+          };
+        }
+      }
+    } else if (latitude && longitude) {
+      // Simple format: direct lat/long fields
+      gpsData = {
+        latitude,
+        longitude,
+        altitude,
+        accuracy,
+        speed,
+        heading
+      };
+    }
+
+    if (!gpsData) {
+      logger.warn('No GPS coordinates found in payload:', req.body);
+      return res.status(200).json({
+        success: true,
+        message: 'Data received but no GPS coordinates found',
+        device: { serNo, IMEI: deviceIMEI, mapped: false }
+      });
+    }
 
     // Determine boat identifier and get boat info from database
     let boat = null;
@@ -151,46 +208,45 @@ router.post('/kpn-gps', async (req, res) => {
     if (bootnummer) {
       boat = await database.getBoat(bootnummer);
       boatIdentifier = bootnummer;
-    } else if (imei) {
-      boat = await database.getBoat(imei);
-      boatIdentifier = imei;
+    } else if (deviceIMEI) {
+      boat = await database.getBoat(deviceIMEI);
+      boatIdentifier = deviceIMEI;
     }
 
     // Log GPS data even if boat not found (for serial tracking)
     logger.info('KPN GPS data received:', {
       bootnummer,
-      imei,
+      imei: deviceIMEI,
       serNo,
-      coordinates: [latitude, longitude],
-      timestamp,
-      boatFound: !!boat
+      coordinates: [gpsData.latitude, gpsData.longitude],
+      timestamp: gpsTimestamp,
+      boatFound: !!boat,
+      recordCount: Records ? Records.length : 0
     });
 
     if (!boat) {
       logger.warn('GPS data received for unknown boat - logging serial data:', {
         bootnummer,
-        imei,
+        imei: deviceIMEI,
         serNo,
-        coordinates: [latitude, longitude]
+        coordinates: [gpsData.latitude, gpsData.longitude],
+        timestamp: gpsTimestamp
       });
 
       // Return success instead of error to keep KPN happy
       return res.status(200).json({
         success: true,
-        message: 'GPS data received and logged (boat not mapped)',
+        message: 'GPS data received and logged (device not mapped)',
         device: {
+          SerNo: serNo,
+          IMEI: deviceIMEI,
           bootnummer,
-          imei,
-          serNo,
           mapped: false
         },
         gpsData: {
-          timestamp,
-          coordinates: [latitude, longitude],
-          altitude,
-          accuracy,
-          speed,
-          heading
+          timestamp: gpsTimestamp,
+          coordinates: [gpsData.latitude, gpsData.longitude],
+          ...gpsData
         },
         processed: {
           timestamp: new Date().toISOString(),
@@ -204,44 +260,57 @@ router.post('/kpn-gps', async (req, res) => {
     logger.info(`GPS update received for boat ${actualBoatNumber}`, {
       bootnummer: actualBoatNumber,
       imei: boat.imei,
-      timestamp,
-      coordinates: [latitude, longitude],
-      accuracy,
-      speed: speed || 'unknown'
+      serNo,
+      timestamp: gpsTimestamp,
+      coordinates: [gpsData.latitude, gpsData.longitude],
+      accuracy: gpsData.accuracy,
+      speed: gpsData.speed || 'unknown'
     });
 
     // Map GPS coordinates to parade route
     const routePosition = await routeMapper.mapToRoute({
-      latitude,
-      longitude,
-      timestamp: new Date(timestamp)
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      timestamp: new Date(gpsTimestamp)
     });
 
     if (!routePosition) {
       logger.warn(`Could not map GPS position to route for boat ${actualBoatNumber}`, {
         bootnummer: actualBoatNumber,
         imei: boat.imei,
-        coordinates: [latitude, longitude]
+        serNo,
+        coordinates: [gpsData.latitude, gpsData.longitude]
       });
 
-      return res.status(422).json({
-        error: 'GPS position could not be mapped to parade route',
-        bootnummer: actualBoatNumber,
-        imei: boat.imei,
-        coordinates: [latitude, longitude]
+      // Return success even if route mapping fails
+      return res.status(200).json({
+        success: true,
+        message: 'GPS data processed but not mapped to route',
+        device: {
+          SerNo: serNo,
+          IMEI: deviceIMEI,
+          mapped: true,
+          boatNumber: actualBoatNumber,
+          boatName: boat.name
+        },
+        gpsData: {
+          timestamp: gpsTimestamp,
+          coordinates: [gpsData.latitude, gpsData.longitude],
+          ...gpsData
+        }
       });
     }
 
     // Prepare position data
     const positionData = {
-      latitude,
-      longitude,
-      timestamp: new Date(timestamp),
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      timestamp: new Date(gpsTimestamp),
       routeDistance: routePosition.distanceMeters,
       routeProgress: routePosition.progressPercent,
-      speed: speed || routePosition.estimatedSpeed,
-      heading: heading || routePosition.heading,
-      altitude: altitude || null,
+      speed: gpsData.speed || routePosition.estimatedSpeed,
+      heading: gpsData.heading || routePosition.heading,
+      altitude: gpsData.altitude || null,
       accuracy: accuracy || null
     };
 
