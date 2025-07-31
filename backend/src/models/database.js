@@ -24,13 +24,21 @@ async function initializeDatabase() {
         pgPool = new Pool({
           connectionString: process.env.DATABASE_URL,
           ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-          max: 20,
+          max: 10,
           idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 2000,
+          connectionTimeoutMillis: 5000,
+          acquireTimeoutMillis: 5000,
+          statement_timeout: 10000,
+          query_timeout: 10000
         });
 
-        // Test PostgreSQL connection
-        const client = await pgPool.connect();
+        // Test PostgreSQL connection with timeout
+        const client = await Promise.race([
+          pgPool.connect(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Connection timeout')), 5000)
+          )
+        ]);
         await client.query('SELECT NOW()');
         client.release();
 
@@ -1422,8 +1430,27 @@ async function getWebhookStats() {
   }
 }
 
+/**
+ * Test database connection for health checks
+ */
+async function testConnection() {
+  if (pgPool) {
+    const client = await Promise.race([
+      pgPool.connect(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Health check timeout')), 3000)
+      )
+    ]);
+    await client.query('SELECT 1');
+    client.release();
+    return true;
+  }
+  throw new Error('No database connection available');
+}
+
 module.exports = {
   initializeDatabase,
+  testConnection,
   resetDatabase,
   saveBoatPosition,
   saveBoatIncident,
