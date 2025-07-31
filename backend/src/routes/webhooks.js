@@ -62,7 +62,10 @@ router.use(logWebhookMiddleware);
 // Enhanced validation schema for KPN GPS webhook
 const gpsPayloadSchema = Joi.object({
   bootnummer: Joi.number().integer().min(1).max(999).optional(),
-  imei: Joi.string().length(15).pattern(/^\d+$/).optional(),
+  imei: Joi.string().min(10).max(20).optional(), // More flexible IMEI
+  SerNo: Joi.number().integer().optional(), // Allow SerNo for tracking
+  SerialNumber: Joi.number().integer().optional(), // Alternative serial field
+  serial: Joi.number().integer().optional(), // Another alternative
   timestamp: Joi.string().isoDate().required(),
   latitude: Joi.number().min(-90).max(90).required(),
   longitude: Joi.number().min(-180).max(180).required(),
@@ -70,7 +73,7 @@ const gpsPayloadSchema = Joi.object({
   accuracy: Joi.number().min(0).optional(),
   speed: Joi.number().min(0).optional(),
   heading: Joi.number().min(0).max(360).optional()
-}).or('bootnummer', 'imei'); // At least one of bootnummer or imei is required
+}).unknown(true); // Allow unknown fields for flexibility
 
 // Flexible validation schema for tracker device webhook format
 // Accepts real KPN data with various field combinations
