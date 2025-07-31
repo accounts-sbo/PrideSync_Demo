@@ -17,7 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Trust proxy for Railway deployment (fixes X-Forwarded-For warnings)
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
@@ -32,11 +32,14 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting
+// Rate limiting with proper trust proxy configuration
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // limit each IP to 1000 requests per windowMs
-  message: 'Too many requests from this IP'
+  message: 'Too many requests from this IP',
+  trustProxy: true, // Explicitly trust proxy for rate limiting
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
 app.use('/api/', limiter);
 
