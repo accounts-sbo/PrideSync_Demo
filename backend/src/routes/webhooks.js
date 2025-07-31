@@ -7,8 +7,13 @@ const database = require('../models/database');
 
 const router = express.Router();
 
-// Middleware to log all webhook requests
+// Middleware to log webhook requests (only for actual webhook endpoints, not monitoring)
 async function logWebhookMiddleware(req, res, next) {
+  // Skip logging for monitoring endpoints
+  if (req.path === '/logs' || req.path === '/stats' || req.path === '/gps-positions') {
+    return next();
+  }
+
   const startTime = Date.now();
 
   // Store original res.json to capture response
@@ -152,7 +157,7 @@ const trackerPayloadSchema = Joi.object({
  * Receives real-time GPS updates from KPN for parade boats
  * Maps GPS coordinates to parade route and updates boat state
  */
-router.post('/kpn-gps', async (req, res) => {
+router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -444,7 +449,7 @@ router.post('/kpn-gps', async (req, res) => {
  * Receives GPS updates from tracker devices in the format:
  * {"SerNo":1326997,"IMEI":"353760970649317","Records":[...]}
  */
-router.post('/tracker-gps', async (req, res) => {
+router.post('/tracker-gps', logWebhookMiddleware, async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -753,7 +758,7 @@ async function notifyFrontend(bootId, statusData) {
  * Simplified endpoint for KPN serial data with minimal validation
  * Accepts any JSON payload and extracts GPS data flexibly
  */
-router.post('/kpn-serial', async (req, res) => {
+router.post('/kpn-serial', logWebhookMiddleware, async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -977,7 +982,7 @@ router.get('/gps-positions', async (req, res) => {
  *
  * Creates a test webhook log entry for debugging
  */
-router.post('/test-log', async (req, res) => {
+router.post('/test-log', logWebhookMiddleware, async (req, res) => {
   try {
     logger.info('🧪 Creating test webhook log entry');
 
