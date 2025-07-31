@@ -1050,4 +1050,60 @@ router.post('/test-log', logWebhookMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * Test GPS Position Save
+ * POST /api/webhooks/test-gps
+ *
+ * Creates a test GPS position for debugging database save
+ */
+router.post('/test-gps', async (req, res) => {
+  try {
+    logger.info('🧪 Testing GPS position save');
+
+    const testGPSData = {
+      tracker_name: 'TEST_TRACKER',
+      kpn_tracker_id: 9999999,
+      pride_boat_id: null,
+      parade_position: null,
+      latitude: 52.3676,
+      longitude: 4.9041,
+      altitude: 10,
+      accuracy: null,
+      speed: 0,
+      heading: 90,
+      timestamp: new Date(),
+      raw_data: {
+        test: true,
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    logger.info('🗺️ Attempting to save test GPS position:', testGPSData);
+
+    const savedId = await database.saveGPSPosition(testGPSData);
+
+    logger.info('✅ Test GPS position saved with ID:', savedId);
+
+    // Get latest positions to verify
+    const positions = await database.getLatestGPSPositions();
+
+    res.json({
+      success: true,
+      message: 'Test GPS position saved',
+      savedId: savedId,
+      totalPositions: positions.length,
+      testData: testGPSData,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Failed to save test GPS position:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save test GPS position',
+      message: error.message,
+      stack: error.stack
+    });
+  }
+});
+
 module.exports = router;
