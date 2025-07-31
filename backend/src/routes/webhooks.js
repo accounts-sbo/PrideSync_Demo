@@ -359,7 +359,7 @@ router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
 
     // Always save GPS data for later analysis (even unmapped devices)
     try {
-      await database.saveGPSPosition({
+      const gpsPositionData = {
         tracker_name: deviceIMEI || `SerNo_${serNo}`,
         kpn_tracker_id: serNo || null,
         pride_boat_id: actualBoatNumber || null,
@@ -376,7 +376,16 @@ router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
           IMEI: deviceIMEI,
           originalPayload: req.body
         }
+      };
+
+      logger.info('🗺️ Saving GPS position from kpn-gps webhook:', {
+        tracker: gpsPositionData.tracker_name,
+        lat: gpsPositionData.latitude,
+        lng: gpsPositionData.longitude,
+        timestamp: gpsPositionData.timestamp
       });
+
+      await database.saveGPSPosition(gpsPositionData);
 
       logger.info('GPS data saved for analysis:', {
         SerNo: serNo,
@@ -586,7 +595,7 @@ router.post('/tracker-gps', logWebhookMiddleware, async (req, res) => {
 
         // Always save GPS data for later analysis (even unmapped devices)
         try {
-          await database.saveGPSPosition({
+          const gpsPositionData = {
             tracker_name: `SerNo_${SerNo}`,
             kpn_tracker_id: SerNo,
             pride_boat_id: boatNumber || null,
@@ -604,7 +613,16 @@ router.post('/tracker-gps', logWebhookMiddleware, async (req, res) => {
               record: record,
               originalPayload: req.body
             }
+          };
+
+          logger.info('🗺️ Saving GPS position from tracker-gps webhook:', {
+            tracker: gpsPositionData.tracker_name,
+            lat: gpsPositionData.latitude,
+            lng: gpsPositionData.longitude,
+            timestamp: gpsPositionData.timestamp
           });
+
+          await database.saveGPSPosition(gpsPositionData);
 
           logger.info('GPS data saved for analysis:', {
             SerNo,

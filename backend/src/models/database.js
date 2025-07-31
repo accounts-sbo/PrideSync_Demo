@@ -380,8 +380,15 @@ async function saveBoatPosition(boatNumber, positionData) {
  * Save GPS position data for analysis (all devices, mapped and unmapped)
  */
 async function saveGPSPosition(gpsData) {
+  logger.info('📍 saveGPSPosition called with data:', {
+    tracker_name: gpsData.tracker_name,
+    latitude: gpsData.latitude,
+    longitude: gpsData.longitude,
+    timestamp: gpsData.timestamp
+  });
+
   if (!pgPool) {
-    logger.debug('No database connection, skipping GPS position save');
+    logger.warn('❌ No database connection, skipping GPS position save');
     return;
   }
 
@@ -410,8 +417,9 @@ async function saveGPSPosition(gpsData) {
   ];
 
   try {
+    logger.info('💾 Inserting GPS position into database...');
     const result = await pgPool.query(query, values);
-    logger.debug(`GPS position saved for tracker ${gpsData.tracker_name}`, {
+    logger.info(`✅ GPS position saved for tracker ${gpsData.tracker_name}`, {
       id: result.rows[0].id,
       latitude: gpsData.latitude,
       longitude: gpsData.longitude
@@ -427,9 +435,20 @@ async function saveGPSPosition(gpsData) {
  * Get latest GPS positions for all tracked devices
  */
 async function getLatestGPSPositions() {
+  logger.info('📋 getLatestGPSPositions called');
+
   if (!pgPool) {
-    logger.debug('No database connection, returning empty GPS positions');
+    logger.warn('❌ No database connection, returning empty GPS positions');
     return [];
+  }
+
+  // First check if table exists and has data
+  try {
+    const countResult = await pgPool.query('SELECT COUNT(*) FROM gps_positions');
+    const totalCount = parseInt(countResult.rows[0].count);
+    logger.info(`📊 Total GPS positions in database: ${totalCount}`);
+  } catch (error) {
+    logger.error('❌ Error checking GPS positions count:', error);
   }
 
   const query = `
@@ -461,10 +480,10 @@ async function getLatestGPSPositions() {
 
   try {
     const result = await pgPool.query(query);
-    logger.debug(`Retrieved ${result.rows.length} latest GPS positions`);
+    logger.info(`✅ Retrieved ${result.rows.length} latest GPS positions`);
     return result.rows;
   } catch (error) {
-    logger.error('Error getting latest GPS positions:', error);
+    logger.error('❌ Error getting latest GPS positions:', error);
     throw error;
   }
 }
