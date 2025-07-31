@@ -46,16 +46,19 @@ export default function WebhooksPage() {
       // Get backend URL
       const backendUrl = process.env.NODE_ENV === 'production'
         ? 'https://pridesyncdemo-production.up.railway.app'
-        : 'http://localhost:3000';
+        : 'http://localhost:3001';
 
-      const response = await fetch(`${backendUrl}/api/webhooks/logs?limit=100`);
+      const response = await fetch(`${backendUrl}/api/webhooks/logs?limit=200`);
       const data = await response.json();
+
+      console.log('📋 Webhook logs response:', data);
 
       if (data.success) {
         setLogs(data.data.logs);
         setStats(data.data.stats);
+        console.log(`📊 Loaded ${data.data.logs.length} webhook logs, ${data.data.stats.total_requests} total`);
       } else {
-        console.error('API returned error:', data);
+        console.error('❌ API returned error:', data);
       }
     } catch (error) {
       console.error('Failed to fetch webhook data:', error);
@@ -107,6 +110,34 @@ export default function WebhooksPage() {
     return JSON.stringify(obj, null, 2);
   };
 
+  const createTestLog = async () => {
+    try {
+      const backendUrl = process.env.NODE_ENV === 'production'
+        ? 'https://pridesyncdemo-production.up.railway.app'
+        : 'http://localhost:3001';
+
+      const response = await fetch(`${backendUrl}/api/webhooks/test-log`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          test: true,
+          timestamp: new Date().toISOString(),
+          message: 'Test webhook log from frontend'
+        })
+      });
+
+      const data = await response.json();
+      console.log('🧪 Test log created:', data);
+
+      // Refresh logs after creating test
+      await fetchWebhookData();
+    } catch (error) {
+      console.error('❌ Failed to create test log:', error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white">
@@ -145,6 +176,13 @@ export default function WebhooksPage() {
             >
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
+            </Button>
+            <Button
+              onClick={createTestLog}
+              variant="outline"
+              className="border-blue-600 text-blue-300 hover:bg-blue-900"
+            >
+              🧪 Test Log
             </Button>
           </div>
         </div>

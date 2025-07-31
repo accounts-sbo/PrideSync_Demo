@@ -32,14 +32,15 @@ async function logWebhookMiddleware(req, res, next) {
   // Continue to next middleware
   next();
 
-  // Log after response is sent
+  // Log immediately after response is sent
   res.on('finish', async () => {
     const processingTime = Date.now() - startTime;
+    const finalStatus = responseStatus || res.statusCode;
 
     try {
-      logger.info(`Logging webhook request: ${req.method} ${req.path} - Status: ${responseStatus || res.statusCode}`);
+      logger.info(`🔍 Webhook logging: ${req.method} ${req.path} - Status: ${finalStatus}`);
 
-      await database.logWebhookRequest({
+      const webhookData = {
         endpoint: req.path,
         method: req.method,
         headers: req.headers,
@@ -47,16 +48,23 @@ async function logWebhookMiddleware(req, res, next) {
         query_params: req.query,
         ip_address: req.ip || req.connection.remoteAddress,
         user_agent: req.get('User-Agent'),
-        response_status: responseStatus || res.statusCode,
+        response_status: finalStatus,
         response_body: responseBody,
         processing_time_ms: processingTime,
         error_message: null
-      });
+      };
 
-      logger.info(`Webhook request logged successfully: ${req.method} ${req.path}`);
+      await database.logWebhookRequest(webhookData);
+
+      logger.info(`✅ Webhook logged: ${req.method} ${req.path} (${finalStatus}) - ${processingTime}ms`);
     } catch (error) {
-      logger.error('Failed to log webhook request:', error);
-      logger.error('Error details:', error.message);
+      logger.error('❌ Failed to log webhook request:', {
+        error: error.message,
+        stack: error.stack,
+        endpoint: req.path,
+        method: req.method,
+        status: finalStatus
+      });
     }
   });
 }
@@ -879,8 +887,12 @@ router.get('/logs', async (req, res) => {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
+    logger.info(`📋 Fetching webhook logs: limit=${limit}, offset=${offset}`);
+
     const logs = await database.getWebhookLogs(limit, offset);
     const stats = await database.getWebhookStats();
+
+    logger.info(`📊 Webhook logs retrieved: ${logs.length} logs, ${stats.total_requests} total`);
 
     res.json({
       success: true,
@@ -892,10 +904,15 @@ router.get('/logs', async (req, res) => {
           offset,
           total: stats.total_requests
         }
+      },
+      debug: {
+        logsCount: logs.length,
+        totalRequests: stats.total_requests,
+        timestamp: new Date().toISOString()
       }
     });
   } catch (error) {
-    logger.error('Error fetching webhook logs:', error);
+    logger.error('❌ Error fetching webhook logs:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch webhook logs',
@@ -949,6 +966,50 @@ router.get('/gps-positions', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch GPS positions',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Test Webhook Logging
+ * POST /api/webhooks/test-log
+ *
+ * Creates a test webhook log entry for debugging
+ */
+router.post('/test-log', async (req, res) => {
+  try {
+    logger.info('🧪 Creating test webhook log entry');
+
+    const testData = {
+      endpoint: '/api/webhooks/test-log',
+      method: 'POST',
+      headers: req.headers,
+      body: req.body || { test: 'data', timestamp: new Date().toISOString() },
+      query_params: req.query,
+      ip_address: req.ip || req.connection.remoteAddress,
+      user_agent: req.get('User-Agent'),
+      response_status: 200,
+      response_body: { success: true, test: true },
+      processing_time_ms: Math.floor(Math.random() * 100) + 10,
+      error_message: null
+    };
+
+    await database.logWebhookRequest(testData);
+
+    logger.info('✅ Test webhook log created successfully');
+
+    res.json({
+      success: true,
+      message: 'Test webhook log created',
+      data: testData,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Failed to create test webhook log:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create test log',
       message: error.message
     });
   }
