@@ -451,31 +451,24 @@ async function getLatestGPSPositions() {
     logger.error('❌ Error checking GPS positions count:', error);
   }
 
+  // Simple query first to debug
   const query = `
-    WITH latest_positions AS (
-      SELECT DISTINCT ON (tracker_name)
-        tracker_name,
-        kpn_tracker_id,
-        pride_boat_id,
-        parade_position,
-        latitude,
-        longitude,
-        altitude,
-        speed,
-        heading,
-        timestamp,
-        raw_data,
-        received_at
-      FROM gps_positions
-      ORDER BY tracker_name, timestamp DESC
-    )
     SELECT
-      lp.*,
-      pb.boat_name,
-      pb.organisation
-    FROM latest_positions lp
-    LEFT JOIN pride_boats pb ON lp.pride_boat_id = pb.parade_position
-    ORDER BY lp.timestamp DESC
+      tracker_name,
+      kpn_tracker_id,
+      pride_boat_id,
+      parade_position,
+      latitude,
+      longitude,
+      altitude,
+      speed,
+      heading,
+      timestamp,
+      raw_data,
+      received_at
+    FROM gps_positions
+    ORDER BY timestamp DESC
+    LIMIT 50
   `;
 
   try {
