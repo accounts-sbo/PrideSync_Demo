@@ -50,17 +50,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Simple health check for Railway deployment
+// Ultra-simple health check for Railway deployment
 app.get('/health', (req, res) => {
-  // Always return 200 OK immediately - no async operations
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
-    uptime: process.uptime(),
-    server: 'running'
-  });
+  res.status(200).send('OK');
+});
+
+// Alternative health check
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'OK' });
 });
 
 // Detailed health check with database status
