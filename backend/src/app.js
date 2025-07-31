@@ -50,7 +50,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ultra-simple health check for Railway deployment - updated for KPN support
+// Ultra-simple health check for Railway deployment - no database calls
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
@@ -119,21 +119,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Initialize database and start server
-async function startServer() {
-  // Start HTTP server immediately (don't wait for database)
-  try {
-    const server = app.listen(PORT, '0.0.0.0', () => {
-      logger.info(`🚂 PrideSync Backend running on port ${PORT}`);
-      logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
-      logger.info(`📡 Webhook endpoints:`);
-      logger.info(`   - KPN GPS: http://0.0.0.0:${PORT}/api/webhooks/kpn-gps`);
-      logger.info(`   - Tracker GPS: http://0.0.0.0:${PORT}/api/webhooks/tracker-gps`);
-      logger.info(`🔧 Device Management CMS: http://0.0.0.0:${PORT}/api/device-management/cms`);
-    });
+// Start server immediately without any database initialization
+const server = app.listen(PORT, '0.0.0.0', () => {
+  logger.info(`🚂 PrideSync Backend running on port ${PORT}`);
+  logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(`🔗 Health check: http://0.0.0.0:${PORT}/health`);
+  logger.info(`📡 Webhook endpoints:`);
+  logger.info(`   - KPN GPS: http://0.0.0.0:${PORT}/api/webhooks/kpn-gps`);
+  logger.info(`   - Tracker GPS: http://0.0.0.0:${PORT}/api/webhooks/tracker-gps`);
+  logger.info(`🔧 Device Management CMS: http://0.0.0.0:${PORT}/api/device-management/cms`);
 
-    // Initialize database connections in background (non-blocking)
+  // Initialize database in background after server is running
+  setTimeout(() => {
     database.initializeDatabase()
       .then(() => {
         logger.info('✅ Database initialization completed');
@@ -142,13 +139,7 @@ async function startServer() {
         logger.error('❌ Database initialization failed:', error);
         logger.warn('⚠️ Server running without database connections');
       });
-
-  } catch (error) {
-    logger.error('❌ Failed to start HTTP server:', error);
-    process.exit(1);
-  }
-}
-
-startServer();
+  }, 100); // Small delay to ensure server is fully started
+});
 
 module.exports = app;
