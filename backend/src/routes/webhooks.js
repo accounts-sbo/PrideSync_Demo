@@ -61,12 +61,9 @@ async function extractAndSaveGPSPosition(payload, serNo, deviceIMEI, boatNumber 
       return null;
     }
 
-    // Prepare GPS position data for database
+    // Prepare GPS position data for database (without foreign key constraint)
     const gpsPositionData = {
       tracker_name: serNo ? serNo.toString() : (deviceIMEI || 'unknown'),
-      kpn_tracker_id: serNo || null,
-      pride_boat_id: boatNumber || null,
-      parade_position: boatNumber || null,
       latitude: gpsData.latitude,
       longitude: gpsData.longitude,
       altitude: gpsData.altitude,
@@ -83,8 +80,8 @@ async function extractAndSaveGPSPosition(payload, serNo, deviceIMEI, boatNumber 
       }
     };
 
-    // Save to database
-    const savedId = await database.saveGPSPosition(gpsPositionData);
+    // Save to database using direct insert (bypass foreign key constraint)
+    const savedId = await database.saveGPSPositionDirect(gpsPositionData);
 
     logger.info('✅ GPS position saved to database:', {
       id: savedId,

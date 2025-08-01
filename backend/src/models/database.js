@@ -2749,6 +2749,54 @@ async function testGPSInsert() {
   }
 }
 
+async function saveGPSPositionDirect(gpsData) {
+  logger.info('📍 saveGPSPositionDirect called with data:', {
+    tracker_name: gpsData.tracker_name,
+    latitude: gpsData.latitude,
+    longitude: gpsData.longitude,
+    timestamp: gpsData.timestamp
+  });
+
+  if (!pgPool) {
+    logger.warn('❌ No database connection, skipping GPS position save');
+    return;
+  }
+
+  const query = `
+    INSERT INTO gps_positions (
+      tracker_name, latitude, longitude, altitude, accuracy, speed, heading,
+      timestamp, raw_data
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING id
+  `;
+
+  const values = [
+    gpsData.tracker_name,
+    gpsData.latitude,
+    gpsData.longitude,
+    gpsData.altitude,
+    gpsData.accuracy,
+    gpsData.speed,
+    gpsData.heading,
+    gpsData.timestamp,
+    JSON.stringify(gpsData.raw_data)
+  ];
+
+  try {
+    logger.info('💾 Inserting GPS position into database (direct)...');
+    const result = await pgPool.query(query, values);
+    logger.info(`✅ GPS position saved directly for tracker ${gpsData.tracker_name}`, {
+      id: result.rows[0].id,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude
+    });
+    return result.rows[0].id;
+  } catch (error) {
+    logger.error(`Error saving GPS position directly for tracker ${gpsData.tracker_name}:`, error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -2810,5 +2858,6 @@ module.exports = {
   processBoatsCSV,
   extractHistoricalGPSData,
   forceExtractGPSFromWebhooks,
-  testGPSInsert
+  testGPSInsert,
+  saveGPSPositionDirect
 };
