@@ -3,9 +3,9 @@
 const getBackendUrl = () => {
   // In production, use the Railway backend URL
   if (process.env.NODE_ENV === 'production') {
-    return process.env.NEXT_PUBLIC_BACKEND_URL || 'https://pridesync-demo-production.up.railway.app';
+    return process.env.NEXT_PUBLIC_BACKEND_URL || 'https://pridesync-backend-production.up.railway.app';
   }
-  
+
   // In development, use localhost
   return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 };
@@ -16,11 +16,25 @@ const getApiUrl = (endpoint: string) => {
 };
 
 export const api = {
+  // Test API connection
+  async testConnection() {
+    try {
+      const response = await this.fetch('/health');
+      console.log('🏥 Backend Health Check:', response);
+      return response;
+    } catch (error) {
+      console.error('❌ Backend connection failed:', error);
+      throw error;
+    }
+  },
+
   // Generic fetch wrapper with error handling
   async fetch(endpoint: string, options: RequestInit = {}) {
     const url = getApiUrl(endpoint);
-    
+
     try {
+      console.log(`🔗 API Call: ${url}`); // Debug logging
+
       const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
@@ -29,13 +43,19 @@ export const api = {
         ...options,
       });
 
+      console.log(`📡 Response status: ${response.status}`); // Debug logging
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`❌ API Error Response:`, errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      console.log(`✅ API Success:`, data); // Debug logging
+      return data;
     } catch (error) {
-      console.error(`API call failed for ${endpoint}:`, error);
+      console.error(`❌ API call failed for ${endpoint}:`, error);
       throw error;
     }
   },

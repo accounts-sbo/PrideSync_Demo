@@ -420,8 +420,20 @@ export default function PrideBoatBallot() {
 
   // Load boats from API
   useEffect(() => {
-    loadBoats();
-    loadUserStats();
+    // Test API connection first
+    api.testConnection()
+      .then(() => {
+        console.log('✅ Backend connection successful');
+        loadBoats();
+        loadUserStats();
+      })
+      .catch((error) => {
+        console.error('❌ Backend connection failed:', error);
+        // Still try to load boats (will use fallback data)
+        loadBoats();
+        loadUserStats();
+      });
+
     initializeAchievements();
   }, []);
 
