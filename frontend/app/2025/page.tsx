@@ -741,23 +741,11 @@ export default function PrideBoatBallot() {
 
   // Star swipe detection functions
   const handleStarTouchStart = (e: React.TouchEvent) => {
-    console.log('Star touch start detected');
+    console.log('⭐ Star touch start detected');
 
-    // Check conditions
+    // Additional check for GPS overlay (main conditions are checked in JSX)
     if (showGpsOverlay) {
-      console.log('Star touch blocked - GPS overlay is shown');
-      return;
-    }
-    if (isStarCooldown) {
-      console.log('Star touch blocked by cooldown');
-      return;
-    }
-    if (!currentBoat) {
-      console.log('Star touch blocked - no current boat');
-      return;
-    }
-    if ((userVotes[currentBoat.id] || 0) >= 5) {
-      console.log('Star touch blocked - 5 star limit reached');
+      console.log('⭐ Star touch blocked - GPS overlay is shown');
       return;
     }
 
@@ -767,10 +755,17 @@ export default function PrideBoatBallot() {
       y: touch.clientY,
       time: Date.now()
     });
+    console.log('⭐ Star touch start registered:', { x: touch.clientX, y: touch.clientY });
   };
 
   const handleStarTouchEnd = (e: React.TouchEvent) => {
-    if (!starTouchStart || showGpsOverlay) return; // Disable swipe when GPS overlay is shown
+    console.log('⭐ Star touch end detected');
+
+    if (!starTouchStart || showGpsOverlay) {
+      console.log('⭐ Star touch end blocked:', { starTouchStart: !!starTouchStart, showGpsOverlay });
+      setStarTouchStart(null);
+      return;
+    }
 
     const touch = e.changedTouches[0];
     const deltaX = touch.clientX - starTouchStart.x;
@@ -780,14 +775,24 @@ export default function PrideBoatBallot() {
     // Check if it's a swipe up (negative deltaY means up)
     const isSwipeUp = deltaY < -50 && Math.abs(deltaX) < 100 && deltaTime < 500;
 
-    console.log('Star touch end:', { deltaX, deltaY, deltaTime, isSwipeUp });
+    console.log('⭐ Star touch end analysis:', {
+      deltaX,
+      deltaY,
+      deltaTime,
+      isSwipeUp,
+      swipeUpCondition: deltaY < -50,
+      horizontalCondition: Math.abs(deltaX) < 100,
+      timeCondition: deltaTime < 500
+    });
 
     if (isSwipeUp) {
       e.preventDefault();
+      console.log('⭐ Star swipe up detected! Sending star vote...');
 
-      // First try to send the star vote (fixed)
+      // First try to send the star vote
       sendStar()
         .then(() => {
+          console.log('Star vote successful, triggering animation');
           // Only trigger animation if vote was successful
           triggerStarAnimation(touch.clientX, touch.clientY);
         })
@@ -797,6 +802,8 @@ export default function PrideBoatBallot() {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
         });
+    } else {
+      console.log('Star swipe not detected - conditions not met');
     }
 
     setStarTouchStart(null);
@@ -1369,6 +1376,16 @@ export default function PrideBoatBallot() {
           className={`stars-section flex-1 bg-gradient-to-br from-yellow-400 to-orange-500 flex flex-col items-center justify-center text-white cursor-pointer active:scale-95 transition-all duration-300 relative overflow-hidden ${
             isStarCooldown || (currentBoat && (userVotes[currentBoat.id] || 0) >= 5) ? 'opacity-60 cursor-not-allowed' : ''
           }`}
+          onMouseEnter={() => {
+            const touchEnabled = !isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5;
+            console.log('⭐ Star section hover - Touch enabled:', touchEnabled, {
+              isStarCooldown,
+              currentBoat: !!currentBoat,
+              currentBoatId: currentBoat?.id,
+              userVotes: currentBoat ? userVotes[currentBoat.id] || 0 : 'no boat',
+              condition: (userVotes[currentBoat?.id || 0] || 0) < 5
+            });
+          }}
           onClick={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
             // For desktop/click, trigger animation at center of element
             const rect = e.currentTarget.getBoundingClientRect();
@@ -1388,8 +1405,14 @@ export default function PrideBoatBallot() {
                 alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
               });
           } : undefined}
-          onTouchStart={handleStarTouchStart}
-          onTouchEnd={handleStarTouchEnd}
+          onTouchStart={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
+            console.log('⭐ Touch start wrapper called');
+            handleStarTouchStart(e);
+          } : undefined}
+          onTouchEnd={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
+            console.log('⭐ Touch end wrapper called');
+            handleStarTouchEnd(e);
+          } : undefined}
         >
           <div className="text-6xl mb-4">⭐</div>
           <div className="text-lg font-semibold">
