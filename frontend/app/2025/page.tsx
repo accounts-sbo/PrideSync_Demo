@@ -8,6 +8,7 @@ interface Boat {
   id: number;
   name: string;
   theme: string;
+  organisation?: string;
   position: number;
   hearts: number;
   stars: number;
