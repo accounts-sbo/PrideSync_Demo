@@ -31,18 +31,26 @@ export default function LiveMapPage() {
 
   const fetchGPSPositions = async () => {
     try {
+      console.log('🔄 Fetching GPS positions...');
       // Use Next.js API route proxy instead of direct backend call
       const response = await fetch('/api/webhooks/gps-positions');
-      const data = await response.json();
+      console.log('📡 Response received:', response.status);
 
-      if (data.success) {
+      const data = await response.json();
+      console.log('📊 Data parsed:', { success: data.success, count: data.count, dataLength: data.data?.length });
+
+      if (data.success && data.data) {
         setPositions(data.data);
         setLastUpdate(new Date().toLocaleTimeString());
+        console.log('✅ GPS positions updated:', data.data.length);
+      } else {
+        console.warn('⚠️ No GPS data received or success=false');
       }
     } catch (error) {
-      console.error('Error fetching GPS positions:', error);
+      console.error('❌ Error fetching GPS positions:', error);
     } finally {
       setLoading(false);
+      console.log('🏁 Loading state set to false');
     }
   };
 
