@@ -2527,6 +2527,51 @@ async function forceExtractGPSFromWebhooks() {
   }
 }
 
+async function testGPSInsert() {
+  logger.info('🧪 Testing direct GPS insert');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Test simple insert
+    const insertQuery = `
+      INSERT INTO gps_positions (
+        tracker_name, kpn_tracker_id, latitude, longitude,
+        accuracy, timestamp, raw_data
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, tracker_name, latitude, longitude
+    `;
+
+    const testValues = [
+      'TEST_1424493',
+      1424493,
+      52.3676,
+      4.9041,
+      25,
+      new Date(),
+      JSON.stringify({ test: true, source: 'direct_test' })
+    ];
+
+    logger.info('🔍 Attempting GPS insert with values:', testValues);
+
+    const result = await pgPool.query(insertQuery, testValues);
+
+    logger.info('✅ GPS insert successful:', result.rows[0]);
+
+    return {
+      success: true,
+      inserted_id: result.rows[0].id,
+      data: result.rows[0]
+    };
+
+  } catch (error) {
+    logger.error('❌ Error in test GPS insert:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -2585,5 +2630,6 @@ module.exports = {
   forceCreateTables,
   processBoatsCSV,
   extractHistoricalGPSData,
-  forceExtractGPSFromWebhooks
+  forceExtractGPSFromWebhooks,
+  testGPSInsert
 };

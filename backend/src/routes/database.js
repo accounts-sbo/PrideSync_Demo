@@ -315,4 +315,34 @@ router.post('/force-gps-extraction', async (req, res) => {
   }
 });
 
+/**
+ * Test GPS Insert
+ * POST /api/database/test-gps-insert
+ *
+ * Test direct GPS position insert to debug table issues
+ */
+router.post('/test-gps-insert', async (req, res) => {
+  try {
+    logger.info('🧪 Testing direct GPS insert...');
+
+    const result = await database.testGPSInsert();
+
+    res.json({
+      success: true,
+      message: 'Test GPS insert completed',
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error in test GPS insert:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test GPS insert',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;
