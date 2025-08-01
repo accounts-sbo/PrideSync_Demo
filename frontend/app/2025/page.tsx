@@ -1777,7 +1777,8 @@ export default function PrideBoatBallot() {
                 alert('API connection successful!');
               } catch (error) {
                 console.error('❌ API test failed:', error);
-                alert('API connection failed: ' + error.message);
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                alert('API connection failed: ' + errorMessage);
               }
             }}
             className="block bg-blue-500 text-white px-4 py-2 rounded text-sm"
