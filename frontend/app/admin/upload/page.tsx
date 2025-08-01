@@ -101,7 +101,7 @@ export default function UploadPage() {
               CSV Bestand Selecteren
             </CardTitle>
             <CardDescription className="text-gray-400">
-              Verwachte kolommen: Naam, Nr, TRACKER ID, Organisatie/Boot, Thema/Korte beschrijving, P nummers KPN
+              Automatische detectie van kolommen - ondersteunt verschillende CSV formaten
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -231,17 +231,40 @@ export default function UploadPage() {
           </CardHeader>
           <CardContent className="text-gray-300">
             <div className="space-y-3">
-              <p><strong>Verwachte kolommen (tab-separated):</strong></p>
-              <ul className="list-disc list-inside space-y-1 text-sm">
-                <li><strong>Naam:</strong> Organisatie/boot naam</li>
-                <li><strong>Nr:</strong> Parade positie (0-80)</li>
-                <li><strong>TRACKER ID:</strong> KPN tracker nummer (bijv. 1424699)</li>
-                <li><strong>Organisatie/Boot:</strong> Officiële naam</li>
-                <li><strong>Thema/Korte beschrijving:</strong> Beschrijving van de organisatie</li>
-                <li><strong>P nummers KPN:</strong> Asset code (bijv. P81)</li>
-              </ul>
+              <p><strong>Automatische Kolom Detectie:</strong></p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="font-semibold text-blue-300 mb-2">Ondersteunde Kolommen:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li><strong>Naam/Name:</strong> Boot naam</li>
+                    <li><strong>Nr/Position:</strong> Parade positie</li>
+                    <li><strong>Tracker ID:</strong> KPN tracker nummer</li>
+                    <li><strong>Organisatie/Organisation:</strong> Organisatie naam</li>
+                    <li><strong>Thema/Theme/Description:</strong> Beschrijving</li>
+                    <li><strong>Asset Code/P nummer:</strong> KPN asset code</li>
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-semibold text-green-300 mb-2">Flexibele Formaten:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Tab-separated (.tsv)</li>
+                    <li>Comma-separated (.csv)</li>
+                    <li>Nederlandse kolom namen</li>
+                    <li>Engelse kolom namen</li>
+                    <li>Mixed case headers</li>
+                    <li>Extra kolommen worden genegeerd</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="bg-gray-700 rounded-lg p-3 mt-4">
+                <p className="text-sm text-yellow-300 font-semibold">💡 Tip:</p>
+                <p className="text-sm text-gray-300">
+                  Het systeem detecteert automatisch kolommen op basis van namen zoals "naam", "tracker id", "organisatie", etc.
+                  Minimaal vereist: een naam/organisatie kolom en een tracker ID kolom.
+                </p>
+              </div>
               <p className="text-sm text-gray-400 mt-4">
-                Het systeem zal automatisch de database tabellen vullen: pride_boats, kpn_trackers, en boat_tracker_mappings.
+                Database tabellen worden automatisch gevuld: pride_boats, kpn_trackers, en boat_tracker_mappings.
               </p>
             </div>
           </CardContent>

@@ -1998,19 +1998,30 @@ async function processBoatsCSV(csvContent) {
   }
 
   try {
-    // Parse CSV content (tab-separated)
+    // Parse CSV content (detect separator)
     const lines = csvContent.trim().split('\n');
-    const headers = lines[0].split('\t');
+    if (lines.length < 2) {
+      throw new Error('CSV must contain at least a header row and one data row');
+    }
 
+    // Auto-detect separator (tab or comma)
+    const firstLine = lines[0];
+    const separator = firstLine.includes('\t') ? '\t' : ',';
+    logger.info(`📋 Detected CSV separator: ${separator === '\t' ? 'TAB' : 'COMMA'}`);
+
+    const headers = firstLine.split(separator).map(h => h.trim());
     logger.info('📋 CSV headers detected:', headers);
 
-    // Expected headers: Naam, Nr, TRACKER ID, Organisatie/Boot, Thema/Korte beschrijving, P nummers KPN
-    const expectedHeaders = ['Naam', 'Nr', 'TRACKER ID', 'Organisatie/Boot', 'Thema/Korte beschrijving', 'P nummers KPN'];
+    // Create column mapping - flexible field detection
+    const columnMap = createColumnMapping(headers);
+    logger.info('🗺️ Column mapping created:', columnMap);
 
-    // Validate headers
-    const missingHeaders = expectedHeaders.filter(header => !headers.includes(header));
-    if (missingHeaders.length > 0) {
-      throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+    // Validate that we have minimum required fields
+    if (!columnMap.name && !columnMap.organisation) {
+      throw new Error('CSV must contain at least a name or organisation column');
+    }
+    if (!columnMap.trackerId) {
+      throw new Error('CSV must contain a tracker ID column');
     }
 
     const client = await pgPool.connect();
@@ -2026,20 +2037,19 @@ async function processBoatsCSV(csvContent) {
         const line = lines[i].trim();
         if (!line) continue; // Skip empty lines
 
-        const values = line.split('\t');
-        if (values.length < 6) {
-          logger.warn(`⚠️ Skipping row ${i + 1}: insufficient columns`);
+        const values = line.split(separator).map(v => v?.trim());
+        if (values.length < headers.length / 2) {
+          logger.warn(`⚠️ Skipping row ${i + 1}: insufficient columns (${values.length}/${headers.length})`);
           continue;
         }
 
-        const rowData = {
-          naam: values[0]?.trim(),
-          nr: parseInt(values[1]?.trim()) || 0,
-          trackerId: values[2]?.trim(),
-          organisatie: values[3]?.trim(),
-          thema: values[4]?.trim(),
-          pNummer: values[5]?.trim()
-        };
+        // Extract data using flexible column mapping
+        const rowData = extractRowData(values, columnMap, headers);
+
+        if (!rowData.trackerId) {
+          logger.warn(`⚠️ Skipping row ${i + 1}: missing tracker ID`);
+          continue;
+        }
 
         logger.debug(`Processing row ${i + 1}:`, rowData);
 
@@ -2058,11 +2068,11 @@ async function processBoatsCSV(csvContent) {
         `;
 
         const prideBoatResult = await client.query(prideBoatQuery, [
-          rowData.nr,
-          rowData.naam,
-          rowData.organisatie,
-          rowData.organisatie, // Use organisation as theme for now
-          rowData.thema
+          rowData.position || 0,
+          rowData.name || rowData.organisation || 'Unknown',
+          rowData.organisation || rowData.name || 'Unknown',
+          rowData.theme || rowData.organisation || '',
+          rowData.description || rowData.theme || ''
         ]);
 
         const prideBoatId = prideBoatResult.rows[0].id;
@@ -2082,8 +2092,8 @@ async function processBoatsCSV(csvContent) {
 
         const kpnTrackerResult = await client.query(kpnTrackerQuery, [
           rowData.trackerId,
-          rowData.pNummer,
-          `${rowData.organisatie} - ${rowData.thema}`
+          rowData.assetCode || `T${rowData.trackerId}`,
+          `${rowData.organisation || rowData.name} - ${rowData.description || rowData.theme || ''}`
         ]);
 
         const kpnTrackerId = kpnTrackerResult.rows[0].id;
@@ -2108,10 +2118,10 @@ async function processBoatsCSV(csvContent) {
         await client.query(mappingQuery, [
           prideBoatId,
           kpnTrackerId,
-          rowData.nr,
+          rowData.position || 0,
           rowData.trackerId,
-          rowData.pNummer,
-          `CSV import: ${rowData.naam}`
+          rowData.assetCode || `T${rowData.trackerId}`,
+          `CSV import: ${rowData.name || rowData.organisation}`
         ]);
 
         mappingsCreated++;
@@ -2141,6 +2151,82 @@ async function processBoatsCSV(csvContent) {
     logger.error('❌ Error processing boats CSV:', error);
     throw error;
   }
+}
+
+// Helper function to create flexible column mapping
+function createColumnMapping(headers) {
+  const mapping = {};
+
+  headers.forEach((header, index) => {
+    const normalizedHeader = header.toLowerCase().trim();
+
+    // Name/Naam mapping
+    if (normalizedHeader.includes('naam') || normalizedHeader.includes('name') || normalizedHeader === 'boat_name') {
+      mapping.name = index;
+    }
+
+    // Position/Nr mapping
+    if (normalizedHeader.includes('nr') || normalizedHeader.includes('position') || normalizedHeader.includes('pos')) {
+      mapping.position = index;
+    }
+
+    // Tracker ID mapping
+    if (normalizedHeader.includes('tracker') && normalizedHeader.includes('id')) {
+      mapping.trackerId = index;
+    }
+
+    // Organisation mapping
+    if (normalizedHeader.includes('organisatie') || normalizedHeader.includes('organisation') || normalizedHeader.includes('boot')) {
+      mapping.organisation = index;
+    }
+
+    // Theme/Description mapping
+    if (normalizedHeader.includes('thema') || normalizedHeader.includes('theme') || normalizedHeader.includes('beschrijving') || normalizedHeader.includes('description')) {
+      mapping.theme = index;
+      if (!mapping.description) mapping.description = index;
+    }
+
+    // Asset code mapping (P numbers)
+    if (normalizedHeader.includes('p nummer') || normalizedHeader.includes('asset') || normalizedHeader.includes('code')) {
+      mapping.assetCode = index;
+    }
+
+    // IMEI mapping
+    if (normalizedHeader.includes('imei')) {
+      mapping.imei = index;
+    }
+
+    // Captain mapping
+    if (normalizedHeader.includes('captain') || normalizedHeader.includes('kapitein')) {
+      mapping.captain = index;
+    }
+  });
+
+  return mapping;
+}
+
+// Helper function to extract row data using column mapping
+function extractRowData(values, columnMap, headers) {
+  const data = {};
+
+  // Extract mapped fields
+  if (columnMap.name !== undefined) data.name = values[columnMap.name];
+  if (columnMap.position !== undefined) data.position = parseInt(values[columnMap.position]) || 0;
+  if (columnMap.trackerId !== undefined) data.trackerId = values[columnMap.trackerId];
+  if (columnMap.organisation !== undefined) data.organisation = values[columnMap.organisation];
+  if (columnMap.theme !== undefined) data.theme = values[columnMap.theme];
+  if (columnMap.description !== undefined) data.description = values[columnMap.description];
+  if (columnMap.assetCode !== undefined) data.assetCode = values[columnMap.assetCode];
+  if (columnMap.imei !== undefined) data.imei = values[columnMap.imei];
+  if (columnMap.captain !== undefined) data.captain = values[columnMap.captain];
+
+  // Fallbacks and cleanup
+  data.name = data.name || data.organisation || 'Unknown';
+  data.organisation = data.organisation || data.name || 'Unknown';
+  data.description = data.description || data.theme || '';
+  data.theme = data.theme || data.organisation || '';
+
+  return data;
 }
 
 module.exports = {
