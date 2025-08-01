@@ -43,6 +43,12 @@ export default function AdminLayout({
               >
                 Live Map
               </Link>
+              <Link
+                href="/admin/database"
+                className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
+              >
+                Database
+              </Link>
               <Link 
                 href="/" 
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"

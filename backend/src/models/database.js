@@ -1562,6 +1562,126 @@ async function testConnection() {
   throw new Error('No database connection available');
 }
 
+/**
+ * Database Statistics and Table Inspection Functions
+ */
+async function getDatabaseStats() {
+  logger.info('📊 Getting database statistics');
+
+  if (!pgPool) {
+    logger.warn('❌ No database connection for stats');
+    return { tables: [], total_tables: 0, total_rows: 0 };
+  }
+
+  try {
+    // Get all tables in the public schema
+    const tablesQuery = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `;
+
+    const tablesResult = await pgPool.query(tablesQuery);
+    const tables = [];
+    let totalRows = 0;
+
+    for (const table of tablesResult.rows) {
+      const tableName = table.table_name;
+
+      try {
+        // Get row count
+        const countResult = await pgPool.query(`SELECT COUNT(*) FROM "${tableName}"`);
+        const rowCount = parseInt(countResult.rows[0].count);
+
+        // Get column info
+        const columnsQuery = `
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1
+          ORDER BY ordinal_position
+        `;
+        const columnsResult = await pgPool.query(columnsQuery, [tableName]);
+        const columns = columnsResult.rows.map(row => row.column_name);
+
+        tables.push({
+          table_name: tableName,
+          row_count: rowCount,
+          columns: columns
+        });
+
+        totalRows += rowCount;
+      } catch (error) {
+        logger.warn(`⚠️ Could not get stats for table ${tableName}:`, error.message);
+        tables.push({
+          table_name: tableName,
+          row_count: 0,
+          columns: []
+        });
+      }
+    }
+
+    return {
+      tables: tables,
+      total_tables: tables.length,
+      total_rows: totalRows
+    };
+  } catch (error) {
+    logger.error('❌ Error getting database stats:', error);
+    throw error;
+  }
+}
+
+async function getTableData(tableName, limit = 100) {
+  logger.info(`📋 Getting data from table: ${tableName}`);
+
+  if (!pgPool) {
+    logger.warn('❌ No database connection for table data');
+    return { columns: [], rows: [], total_count: 0 };
+  }
+
+  try {
+    // Validate table name exists (prevent SQL injection)
+    const tableExistsQuery = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = $1
+    `;
+    const tableExists = await pgPool.query(tableExistsQuery, [tableName]);
+
+    if (tableExists.rows.length === 0) {
+      throw new Error(`Table ${tableName} does not exist`);
+    }
+
+    // Get column names
+    const columnsQuery = `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+      ORDER BY ordinal_position
+    `;
+    const columnsResult = await pgPool.query(columnsQuery, [tableName]);
+    const columns = columnsResult.rows.map(row => row.column_name);
+
+    // Get total count
+    const countResult = await pgPool.query(`SELECT COUNT(*) FROM "${tableName}"`);
+    const totalCount = parseInt(countResult.rows[0].count);
+
+    // Get data with limit
+    const dataQuery = `SELECT * FROM "${tableName}" ORDER BY 1 DESC LIMIT $1`;
+    const dataResult = await pgPool.query(dataQuery, [limit]);
+
+    return {
+      columns: columns,
+      rows: dataResult.rows,
+      total_count: totalCount
+    };
+  } catch (error) {
+    logger.error(`❌ Error getting table data for ${tableName}:`, error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -1611,5 +1731,8 @@ module.exports = {
   getWebhookStats,
   // Database connections
   pgPool: () => pgPool,
-  redisClient: () => redisClient
+  redisClient: () => redisClient,
+  // Database inspection functions
+  getDatabaseStats,
+  getTableData
 };
