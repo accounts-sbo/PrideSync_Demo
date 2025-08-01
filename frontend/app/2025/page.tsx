@@ -784,8 +784,19 @@ export default function PrideBoatBallot() {
 
     if (isSwipeUp) {
       e.preventDefault();
-      triggerStarAnimation(touch.clientX, touch.clientY);
-      sendStar();
+
+      // First try to send the star vote (fixed)
+      sendStar()
+        .then(() => {
+          // Only trigger animation if vote was successful
+          triggerStarAnimation(touch.clientX, touch.clientY);
+        })
+        .catch((error) => {
+          console.error('Star vote failed, not triggering animation:', error);
+          // Show user-friendly error message
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
+        });
     }
 
     setStarTouchStart(null);
@@ -980,7 +991,21 @@ export default function PrideBoatBallot() {
 
     try {
       const userSession = getUserSession();
-      await api.voting.vote(currentBoat.id, 'star', userSession);
+      console.log('🌟 Sending star vote:', {
+        boatId: currentBoat.id,
+        boatName: currentBoat.name,
+        voteType: 'star',
+        userSession: userSession,
+        currentVotes: currentVotes
+      });
+
+      const result = await api.voting.vote(currentBoat.id, 'star', userSession);
+      console.log('✅ Star vote result:', result);
+
+      // Check if the API call was successful
+      if (!result || !result.success) {
+        throw new Error(`API returned unsuccessful response: ${JSON.stringify(result)}`);
+      }
 
       // Update local state optimistically
       setBoats(boats.map(boat =>
@@ -1009,16 +1034,22 @@ export default function PrideBoatBallot() {
       localStorage.setItem('boatStars', JSON.stringify(newBoatStars));
 
       // Track Power Hour vote
+      console.log('🕐 Tracking Power Hour vote...');
       trackPowerHourVote();
 
       // Check complex achievements
+      console.log('🎯 Checking Perfect Match achievement...');
       checkPerfectMatch(currentBoat.id);
+
+      console.log('🎯 Checking All In achievement...');
       checkAllIn(currentBoat.id);
 
       // Check for new achievements
+      console.log('🏆 Checking achievements...');
       checkAchievements(newStats);
 
       // Trigger pulse animation on star counter
+      console.log('✨ Triggering star counter animation...');
       const starCounter = document.querySelector('.star-counter');
       if (starCounter) {
         starCounter.classList.add('heart-pulse');
@@ -1026,10 +1057,18 @@ export default function PrideBoatBallot() {
           starCounter.classList.remove('heart-pulse');
         }, 600);
       }
+
+      console.log('✅ Star vote completed successfully!');
     } catch (error) {
       console.error('Error sending star:', error);
-      // Show user-friendly error message
-      alert('Er ging iets mis bij het stemmen. Probeer het opnieuw.');
+      console.error('Error details:', {
+        currentBoat: currentBoat,
+        userSession: getUserSession(),
+        error: error
+      });
+
+      // Re-throw the error so the caller can handle it
+      throw error;
     }
   };
 
@@ -1335,8 +1374,19 @@ export default function PrideBoatBallot() {
             const rect = e.currentTarget.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-            triggerStarAnimation(centerX, centerY);
-            sendStar();
+
+            // First try to send the star vote
+            sendStar()
+              .then(() => {
+                // Only trigger animation if vote was successful
+                triggerStarAnimation(centerX, centerY);
+              })
+              .catch((error) => {
+                console.error('Star vote failed, not triggering animation:', error);
+                // Show user-friendly error message
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
+              });
           } : undefined}
           onTouchStart={handleStarTouchStart}
           onTouchEnd={handleStarTouchEnd}
@@ -1697,6 +1747,43 @@ export default function PrideBoatBallot() {
 
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Debug Test Buttons */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed bottom-4 left-4 space-y-2 z-50">
+          <button
+            onClick={() => {
+              sendStar()
+                .then(() => {
+                  alert('Star vote successful!');
+                })
+                .catch((error) => {
+                  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                  alert(`Star vote failed: ${errorMessage}`);
+                });
+            }}
+            className="block bg-yellow-500 text-black px-4 py-2 rounded text-sm"
+          >
+            Test Star Vote
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                console.log('🔗 Testing API connection...');
+                const result = await api.testConnection();
+                console.log('✅ API test result:', result);
+                alert('API connection successful!');
+              } catch (error) {
+                console.error('❌ API test failed:', error);
+                alert('API connection failed: ' + error.message);
+              }
+            }}
+            className="block bg-blue-500 text-white px-4 py-2 rounded text-sm"
+          >
+            Test API
+          </button>
         </div>
       )}
     </div>
