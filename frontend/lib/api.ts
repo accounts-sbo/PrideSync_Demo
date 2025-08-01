@@ -143,6 +143,10 @@ export const api = {
     async getAllBoatLocations() {
       return api.fetch('/api/locations/all');
     },
+
+    async getPrideBoats() {
+      return api.fetch('/api/locations/pride-boats');
+    },
   },
 
   // GPS utility functions

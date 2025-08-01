@@ -1580,6 +1580,14 @@ export default function PrideBoatBallot() {
                           {boat.organisation && (
                             <div className="text-xs text-gray-500 truncate">{boat.organisation}</div>
                           )}
+                          {boat.description && (
+                            <div className="text-xs text-gray-400 truncate mt-1" title={boat.description}>
+                              {boat.description.length > 40 ? `${boat.description.substring(0, 40)}...` : boat.description}
+                            </div>
+                          )}
+                          {boat.captain_name && (
+                            <div className="text-xs text-blue-500 truncate">👨‍✈️ {boat.captain_name}</div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
