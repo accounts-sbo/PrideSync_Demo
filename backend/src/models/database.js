@@ -1342,6 +1342,48 @@ async function getUserVotes(userSession) {
 }
 
 /**
+ * Get all pride boats from database
+ */
+async function getAllPrideBoats() {
+  if (!pgPool) {
+    logger.warn('❌ No database connection, returning empty array');
+    return [];
+  }
+
+  const query = `
+    SELECT
+      id,
+      parade_position,
+      boat_name,
+      organisation,
+      theme,
+      description,
+      captain_name,
+      captain_phone,
+      captain_email,
+      boat_type,
+      length_meters,
+      width_meters,
+      max_persons,
+      status,
+      notes,
+      created_at,
+      updated_at
+    FROM pride_boats
+    ORDER BY parade_position ASC
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    logger.debug(`✅ Retrieved ${result.rows.length} pride boats from database`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting all pride boats:', error);
+    return [];
+  }
+}
+
+/**
  * Ensure demo boats exist in pride_boats table
  */
 async function ensureDemoBoats() {
@@ -1356,19 +1398,49 @@ async function ensureDemoBoats() {
       logger.info('🚢 No boats found, inserting demo boats...');
 
       const demoBoats = [
-        { position: 1, name: 'Rainbow Warriors', organisation: 'Pride Amsterdam', theme: 'Music & Dance' },
-        { position: 2, name: 'Love Boat', organisation: 'COC Nederland', theme: 'Love & Unity' },
-        { position: 3, name: 'Freedom Float', organisation: 'EuroPride', theme: 'Freedom' },
-        { position: 4, name: 'Unity Express', organisation: 'LGBTI+ Alliance', theme: 'Unity' },
-        { position: 5, name: 'Pride Power', organisation: 'Amsterdam Pride', theme: 'Power' }
+        {
+          position: 1,
+          name: 'Rainbow Warriors',
+          organisation: 'Pride Amsterdam',
+          theme: 'Music & Dance',
+          description: 'A vibrant boat celebrating music and dance with rainbow colors'
+        },
+        {
+          position: 2,
+          name: 'Love Boat',
+          organisation: 'COC Nederland',
+          theme: 'Love & Unity',
+          description: 'Spreading love and unity across the Amsterdam canals'
+        },
+        {
+          position: 3,
+          name: 'Freedom Float',
+          organisation: 'EuroPride',
+          theme: 'Freedom',
+          description: 'Celebrating freedom and equality for all'
+        },
+        {
+          position: 4,
+          name: 'Unity Express',
+          organisation: 'LGBTI+ Alliance',
+          theme: 'Unity',
+          description: 'Bringing communities together in celebration'
+        },
+        {
+          position: 5,
+          name: 'Pride Power',
+          organisation: 'Amsterdam Pride',
+          theme: 'Power',
+          description: 'Empowering the LGBTI+ community with pride and strength'
+        }
       ];
 
       for (const boat of demoBoats) {
         await pgPool.query(`
-          INSERT INTO pride_boats (parade_position, boat_name, organisation, theme)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO pride_boats (parade_position, boat_name, organisation, theme, description)
+          VALUES ($1, $2, $3, $4, $5)
           ON CONFLICT (parade_position) DO NOTHING
-        `, [boat.position, boat.name, boat.organisation, boat.theme]);
+        `, [boat.position, boat.name, boat.organisation, boat.theme, boat.description]);
       }
 
       logger.info(`✅ Inserted ${demoBoats.length} demo boats into pride_boats table`);
@@ -2769,6 +2841,7 @@ module.exports = {
   getVoteCounts,
   getUserVotes,
   ensureDemoBoats,
+  getAllPrideBoats,
   // Webhook logging
   logWebhookRequest,
   getWebhookLogs,

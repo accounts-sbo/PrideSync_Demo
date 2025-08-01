@@ -8,6 +8,7 @@ interface Boat {
   id: number;
   name: string;
   theme: string;
+  organisation?: string;
   position: number;
   hearts: number;
   stars: number;
@@ -127,6 +128,7 @@ export default function PrideBoatBallot() {
   const [heartAnimations, setHeartAnimations] = useState<Array<{id: string, x: number, y: number}>>([]);
   const [lastHeartTime, setLastHeartTime] = useState(0);
   const [isHeartCooldown, setIsHeartCooldown] = useState(false);
+  const [votingInProgress, setVotingInProgress] = useState(false);
 
   // Star animation state
   const [starAnimations, setStarAnimations] = useState<Array<{id: string, x: number, y: number}>>([]);
@@ -418,8 +420,20 @@ export default function PrideBoatBallot() {
 
   // Load boats from API
   useEffect(() => {
-    loadBoats();
-    loadUserStats();
+    // Test API connection first
+    api.testConnection()
+      .then(() => {
+        console.log('✅ Backend connection successful');
+        loadBoats();
+        loadUserStats();
+      })
+      .catch((error) => {
+        console.error('❌ Backend connection failed:', error);
+        // Still try to load boats (will use fallback data)
+        loadBoats();
+        loadUserStats();
+      });
+
     initializeAchievements();
   }, []);
 
@@ -599,6 +613,63 @@ export default function PrideBoatBallot() {
     }
   };
 
+  const getUserStarVotes = (boatId: number): number => {
+    return userVotes[boatId] || 0;
+  };
+
+  const handleVote = async (boatId: number, voteType: 'heart' | 'star') => {
+    if (votingInProgress) return;
+
+    // Check star limit
+    if (voteType === 'star' && getUserStarVotes(boatId) >= 5) {
+      return;
+    }
+
+    setVotingInProgress(true);
+
+    try {
+      const userSession = getUserSession();
+      await api.voting.vote(boatId, voteType, userSession);
+
+      // Update boats state
+      setBoats(prev => prev.map(boat =>
+        boat.id === boatId
+          ? {
+              ...boat,
+              [voteType === 'heart' ? 'hearts' : 'stars']: boat[voteType === 'heart' ? 'hearts' : 'stars'] + 1
+            }
+          : boat
+      ));
+
+      // Update user votes for star tracking
+      if (voteType === 'star') {
+        setUserVotes(prev => ({
+          ...prev,
+          [boatId]: (prev[boatId] || 0) + 1
+        }));
+      }
+
+      // Update user stats
+      const newStats = {
+        ...userStats,
+        totalVotes: userStats.totalVotes + 1,
+        boatsVoted: voteType === 'star' && getUserStarVotes(boatId) === 0
+          ? userStats.boatsVoted + 1
+          : userStats.boatsVoted,
+        heartsGiven: voteType === 'heart' ? userStats.heartsGiven + 1 : userStats.heartsGiven
+      };
+      setUserStats(newStats);
+
+      // Check for achievements
+      checkAchievements(newStats);
+
+    } catch (error) {
+      console.error('Error voting:', error);
+    } finally {
+      setVotingInProgress(false);
+    }
+  };
+
   const loadUserStats = async () => {
     try {
       const userSession = getUserSession();
@@ -713,8 +784,19 @@ export default function PrideBoatBallot() {
 
     if (isSwipeUp) {
       e.preventDefault();
-      triggerStarAnimation(touch.clientX, touch.clientY);
-      sendStar();
+
+      // First try to send the star vote (fixed)
+      sendStar()
+        .then(() => {
+          // Only trigger animation if vote was successful
+          triggerStarAnimation(touch.clientX, touch.clientY);
+        })
+        .catch((error) => {
+          console.error('Star vote failed, not triggering animation:', error);
+          // Show user-friendly error message
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
+        });
     }
 
     setStarTouchStart(null);
@@ -909,7 +991,21 @@ export default function PrideBoatBallot() {
 
     try {
       const userSession = getUserSession();
-      await api.voting.vote(currentBoat.id, 'star', userSession);
+      console.log('🌟 Sending star vote:', {
+        boatId: currentBoat.id,
+        boatName: currentBoat.name,
+        voteType: 'star',
+        userSession: userSession,
+        currentVotes: currentVotes
+      });
+
+      const result = await api.voting.vote(currentBoat.id, 'star', userSession);
+      console.log('✅ Star vote result:', result);
+
+      // Check if the API call was successful
+      if (!result || !result.success) {
+        throw new Error(`API returned unsuccessful response: ${JSON.stringify(result)}`);
+      }
 
       // Update local state optimistically
       setBoats(boats.map(boat =>
@@ -938,16 +1034,22 @@ export default function PrideBoatBallot() {
       localStorage.setItem('boatStars', JSON.stringify(newBoatStars));
 
       // Track Power Hour vote
+      console.log('🕐 Tracking Power Hour vote...');
       trackPowerHourVote();
 
       // Check complex achievements
+      console.log('🎯 Checking Perfect Match achievement...');
       checkPerfectMatch(currentBoat.id);
+
+      console.log('🎯 Checking All In achievement...');
       checkAllIn(currentBoat.id);
 
       // Check for new achievements
+      console.log('🏆 Checking achievements...');
       checkAchievements(newStats);
 
       // Trigger pulse animation on star counter
+      console.log('✨ Triggering star counter animation...');
       const starCounter = document.querySelector('.star-counter');
       if (starCounter) {
         starCounter.classList.add('heart-pulse');
@@ -955,10 +1057,18 @@ export default function PrideBoatBallot() {
           starCounter.classList.remove('heart-pulse');
         }, 600);
       }
+
+      console.log('✅ Star vote completed successfully!');
     } catch (error) {
       console.error('Error sending star:', error);
-      // Show user-friendly error message
-      alert('Er ging iets mis bij het stemmen. Probeer het opnieuw.');
+      console.error('Error details:', {
+        currentBoat: currentBoat,
+        userSession: getUserSession(),
+        error: error
+      });
+
+      // Re-throw the error so the caller can handle it
+      throw error;
     }
   };
 
@@ -1264,8 +1374,19 @@ export default function PrideBoatBallot() {
             const rect = e.currentTarget.getBoundingClientRect();
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
-            triggerStarAnimation(centerX, centerY);
-            sendStar();
+
+            // First try to send the star vote
+            sendStar()
+              .then(() => {
+                // Only trigger animation if vote was successful
+                triggerStarAnimation(centerX, centerY);
+              })
+              .catch((error) => {
+                console.error('Star vote failed, not triggering animation:', error);
+                // Show user-friendly error message
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
+              });
           } : undefined}
           onTouchStart={handleStarTouchStart}
           onTouchEnd={handleStarTouchEnd}
@@ -1446,24 +1567,57 @@ export default function PrideBoatBallot() {
               </div>
 
               {showModal === 'leaderboard' && (
-                <div className="space-y-3">
-                  {sortedBoats.slice(0, 10).map((boat, index) => (
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {sortedBoats.map((boat, index) => (
                     <div key={boat.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-3 flex-1">
                         <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-full flex items-center justify-center font-bold text-sm">
                           {index + 1}
                         </div>
-                        <div>
-                          <div className="font-semibold text-gray-800">{boat.name}</div>
-                          <div className="text-sm text-gray-600">{boat.theme}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-800 truncate">{boat.name}</div>
+                          <div className="text-xs text-gray-600 truncate">{boat.theme}</div>
+                          {boat.organisation && (
+                            <div className="text-xs text-gray-500 truncate">{boat.organisation}</div>
+                          )}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-bold text-purple-600">{boat.stars} ⭐</div>
-                        <div className="text-sm text-gray-500">{boat.hearts} 💖</div>
+                      <div className="flex items-center space-x-2">
+                        <div className="text-right mr-2">
+                          <div className="font-bold text-purple-600 text-sm">{boat.stars} ⭐</div>
+                          <div className="text-xs text-gray-500">{boat.hearts} 💖</div>
+                        </div>
+                        {/* Voting buttons */}
+                        <div className="flex flex-col space-y-1">
+                          <button
+                            onClick={() => handleVote(boat.id, 'heart')}
+                            className="w-8 h-8 bg-red-100 hover:bg-red-200 rounded-full flex items-center justify-center text-red-500 hover:text-red-600 transition-colors"
+                            disabled={votingInProgress}
+                          >
+                            💖
+                          </button>
+                          <button
+                            onClick={() => handleVote(boat.id, 'star')}
+                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                              getUserStarVotes(boat.id) >= 5
+                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                : 'bg-yellow-100 hover:bg-yellow-200 text-yellow-500 hover:text-yellow-600'
+                            }`}
+                            disabled={votingInProgress || getUserStarVotes(boat.id) >= 5}
+                            title={getUserStarVotes(boat.id) >= 5 ? 'Maximum 5 sterren per boot' : 'Stem met een ster'}
+                          >
+                            ⭐
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
+                  {sortedBoats.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      <div className="text-4xl mb-2">🚢</div>
+                      <div>Geen boten gevonden</div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1593,6 +1747,43 @@ export default function PrideBoatBallot() {
 
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Debug Test Buttons */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed bottom-4 left-4 space-y-2 z-50">
+          <button
+            onClick={() => {
+              sendStar()
+                .then(() => {
+                  alert('Star vote successful!');
+                })
+                .catch((error) => {
+                  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                  alert(`Star vote failed: ${errorMessage}`);
+                });
+            }}
+            className="block bg-yellow-500 text-black px-4 py-2 rounded text-sm"
+          >
+            Test Star Vote
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                console.log('🔗 Testing API connection...');
+                const result = await api.testConnection();
+                console.log('✅ API test result:', result);
+                alert('API connection successful!');
+              } catch (error) {
+                console.error('❌ API test failed:', error);
+                alert('API connection failed: ' + error.message);
+              }
+            }}
+            className="block bg-blue-500 text-white px-4 py-2 rounded text-sm"
+          >
+            Test API
+          </button>
         </div>
       )}
     </div>

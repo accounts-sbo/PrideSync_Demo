@@ -1,11 +1,79 @@
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
+const { getLatestGPSPositions, getAllPrideBoats } = require('../models/database');
 
-// Mock GPS service for now - will be replaced when colleague's database work is ready
-const mockGpsService = {
+// GPS service using real database data
+const gpsService = {
   async getAllBoats() {
-    // Mock boat data with GPS coordinates around Amsterdam
+    try {
+      // Get latest GPS positions from database
+      const gpsPositions = await getLatestGPSPositions();
+      const prideBoats = await getAllPrideBoats();
+
+      if (!gpsPositions || gpsPositions.length === 0) {
+        logger.warn('No GPS positions found, using fallback data');
+        return await this.getFallbackBoats();
+      }
+
+      // Create a map of tracker_name to pride boat info
+      const prideBoatMap = new Map();
+      prideBoats.forEach(boat => {
+        // Try to match by parade_position or boat_name
+        prideBoatMap.set(boat.parade_position.toString(), boat);
+        prideBoatMap.set(boat.boat_name.toLowerCase(), boat);
+      });
+
+      // Combine GPS positions with pride boat data
+      const boats = [];
+      const processedTrackers = new Set();
+
+      gpsPositions.forEach(pos => {
+        if (processedTrackers.has(pos.tracker_name)) return;
+        processedTrackers.add(pos.tracker_name);
+
+        // Try to find matching pride boat
+        let prideBoat = prideBoatMap.get(pos.tracker_name) ||
+                       prideBoatMap.get(pos.tracker_name.toLowerCase()) ||
+                       prideBoatMap.get(pos.parade_position?.toString());
+
+        // If no direct match, try to find by similar name
+        if (!prideBoat) {
+          for (const [key, boat] of prideBoatMap) {
+            if (key.includes(pos.tracker_name.toLowerCase()) ||
+                pos.tracker_name.toLowerCase().includes(key)) {
+              prideBoat = boat;
+              break;
+            }
+          }
+        }
+
+        boats.push({
+          id: prideBoat?.parade_position || pos.parade_position || boats.length + 1,
+          name: prideBoat?.boat_name || pos.tracker_name,
+          lat: parseFloat(pos.latitude),
+          lon: parseFloat(pos.longitude),
+          theme: prideBoat?.theme || 'Pride Boat',
+          organisation: prideBoat?.organisation || 'Pride Amsterdam',
+          description: prideBoat?.description || '',
+          position: prideBoat?.parade_position || boats.length + 1,
+          tracker_name: pos.tracker_name,
+          timestamp: pos.timestamp,
+          accuracy: pos.accuracy
+        });
+      });
+
+      logger.info(`✅ Retrieved ${boats.length} boats with GPS positions from database`);
+      return boats;
+
+    } catch (error) {
+      logger.error('❌ Error getting boats from database:', error);
+      return await this.getFallbackBoats();
+    }
+  },
+
+  async getFallbackBoats() {
+    // Fallback mock data when database is not available
     return [
       {
         id: 1,
@@ -13,49 +81,21 @@ const mockGpsService = {
         lat: 52.3676,
         lon: 4.9041,
         theme: "Music & Dance",
+        organisation: "Pride Amsterdam",
+        description: "A vibrant boat celebrating music and dance",
         position: 1,
-        hearts: 127,
-        stars: 89
+        tracker_name: "mock_tracker_1"
       },
       {
         id: 2,
-        name: "Pride & Joy", 
+        name: "Pride & Joy",
         lat: 52.3656,
         lon: 4.9061,
         theme: "Love & Unity",
+        organisation: "COC Nederland",
+        description: "Spreading love and unity across the canals",
         position: 2,
-        hearts: 98,
-        stars: 76
-      },
-      {
-        id: 3,
-        name: "Spectrum Sailors",
-        lat: 52.3696,
-        lon: 4.9021,
-        theme: "Diversity", 
-        position: 3,
-        hearts: 156,
-        stars: 92
-      },
-      {
-        id: 4,
-        name: "Unity Float",
-        lat: 52.3636,
-        lon: 4.9081,
-        theme: "Together Strong",
-        position: 4,
-        hearts: 84,
-        stars: 67
-      },
-      {
-        id: 5,
-        name: "Love Boat Amsterdam",
-        lat: 52.3716,
-        lon: 4.9001,
-        theme: "Acceptance",
-        position: 5,
-        hearts: 112,
-        stars: 78
+        tracker_name: "mock_tracker_2"
       }
     ];
   }
@@ -126,7 +166,7 @@ router.get('/nearest', async (req, res) => {
       });
     }
     
-    const boats = await mockGpsService.getAllBoats();
+    const boats = await gpsService.getAllBoats();
     const nearestBoat = proximityCalculator.findNearestBoat(userLat, userLon, boats);
     
     if (!nearestBoat) {
@@ -164,7 +204,7 @@ router.get('/nearest', async (req, res) => {
 // GET /api/locations/all - Get all boat locations
 router.get('/all', async (req, res) => {
   try {
-    const boats = await mockGpsService.getAllBoats();
+    const boats = await gpsService.getAllBoats();
     
     res.json({
       success: true,
