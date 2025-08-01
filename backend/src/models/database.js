@@ -2229,6 +2229,176 @@ function extractRowData(values, columnMap, headers) {
   return data;
 }
 
+async function extractHistoricalGPSData() {
+  logger.info('🔍 Extracting GPS data from historical webhook logs');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Get all webhook logs that contain GPS data
+    const webhookQuery = `
+      SELECT id, endpoint, body, created_at
+      FROM webhook_logs
+      WHERE (endpoint LIKE '%gps%' OR endpoint LIKE '%tracker%')
+      AND body IS NOT NULL
+      AND body::text LIKE '%Records%'
+      AND body::text LIKE '%Lat%'
+      ORDER BY created_at DESC
+    `;
+
+    const webhookResult = await pgPool.query(webhookQuery);
+    const webhooks = webhookResult.rows;
+
+    logger.info(`📊 Found ${webhooks.length} webhook logs with potential GPS data`);
+
+    let webhooksProcessed = 0;
+    let gpsPositionsExtracted = 0;
+    const devicesFound = new Set();
+
+    const client = await pgPool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      for (const webhook of webhooks) {
+        try {
+          const payload = webhook.body;
+
+          // Extract SerNo and IMEI from payload
+          const serNo = payload.SerNo;
+          const imei = payload.IMEI;
+
+          if (!serNo) {
+            continue; // Skip if no SerNo
+          }
+
+          devicesFound.add(serNo);
+
+          // Extract GPS data from Records.Fields
+          if (payload.Records && Array.isArray(payload.Records)) {
+            for (const record of payload.Records) {
+              if (record.Fields && Array.isArray(record.Fields)) {
+                for (const field of record.Fields) {
+                  // Look for GPS coordinates
+                  if ((field.Long !== undefined || field.Lng !== undefined) && field.Lat !== undefined) {
+
+                    const gpsData = {
+                      latitude: parseFloat(field.Lat),
+                      longitude: parseFloat(field.Long || field.Lng),
+                      altitude: field.Alt ? parseFloat(field.Alt) : null,
+                      speed: field.Spd ? parseFloat(field.Spd) : null,
+                      heading: field.Head ? parseFloat(field.Head) : null,
+                      accuracy: field.PosAcc ? parseFloat(field.PosAcc) : null,
+                      pdop: field.PDOP ? parseFloat(field.PDOP) : null,
+                      gpsStatus: field.GpsStat ? parseInt(field.GpsStat) : null
+                    };
+
+                    // Use GPS timestamp if available, otherwise record timestamp, otherwise webhook timestamp
+                    const gpsTimestamp = field.GpsUTC || record.DateUTC || webhook.created_at;
+
+                    // Check if this GPS position already exists (avoid duplicates)
+                    const existsQuery = `
+                      SELECT id FROM gps_positions
+                      WHERE tracker_name = $1
+                      AND latitude = $2
+                      AND longitude = $3
+                      AND timestamp = $4
+                    `;
+
+                    const existsResult = await client.query(existsQuery, [
+                      serNo.toString(),
+                      gpsData.latitude,
+                      gpsData.longitude,
+                      new Date(gpsTimestamp)
+                    ]);
+
+                    if (existsResult.rows.length > 0) {
+                      continue; // Skip duplicate
+                    }
+
+                    // Insert GPS position
+                    const insertQuery = `
+                      INSERT INTO gps_positions (
+                        tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+                        latitude, longitude, altitude, accuracy, speed, heading,
+                        timestamp, raw_data
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                      RETURNING id
+                    `;
+
+                    const insertValues = [
+                      serNo.toString(),
+                      serNo,
+                      null, // Will be mapped later when boat mappings are available
+                      null,
+                      gpsData.latitude,
+                      gpsData.longitude,
+                      gpsData.altitude,
+                      gpsData.accuracy,
+                      gpsData.speed,
+                      gpsData.heading,
+                      new Date(gpsTimestamp),
+                      JSON.stringify({
+                        SerNo: serNo,
+                        IMEI: imei,
+                        gpsStatus: gpsData.gpsStatus,
+                        pdop: gpsData.pdop,
+                        extractedFrom: 'historical_webhook',
+                        webhookId: webhook.id,
+                        originalPayload: payload
+                      })
+                    ];
+
+                    const insertResult = await client.query(insertQuery, insertValues);
+                    gpsPositionsExtracted++;
+
+                    logger.debug('📍 Historical GPS position extracted:', {
+                      id: insertResult.rows[0].id,
+                      SerNo: serNo,
+                      lat: gpsData.latitude,
+                      lng: gpsData.longitude,
+                      timestamp: gpsTimestamp
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          webhooksProcessed++;
+
+        } catch (recordError) {
+          logger.warn(`⚠️ Error processing webhook ${webhook.id}:`, recordError.message);
+          // Continue with next webhook
+        }
+      }
+
+      await client.query('COMMIT');
+
+      const result = {
+        webhooks_processed: webhooksProcessed,
+        gps_positions_extracted: gpsPositionsExtracted,
+        devices_found: devicesFound.size
+      };
+
+      logger.info('✅ Historical GPS extraction completed:', result);
+      return result;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    logger.error('❌ Error extracting historical GPS data:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -2285,5 +2455,6 @@ module.exports = {
   getCleanGPSData,
   createGPSCleanTable,
   forceCreateTables,
-  processBoatsCSV
+  processBoatsCSV,
+  extractHistoricalGPSData
 };

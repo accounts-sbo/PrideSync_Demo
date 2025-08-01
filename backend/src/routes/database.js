@@ -249,4 +249,40 @@ router.post('/upload-boats-csv', upload.single('csv'), async (req, res) => {
   }
 });
 
+/**
+ * Extract GPS Data from Historical Webhooks
+ * POST /api/database/extract-historical-gps
+ *
+ * Analyze existing webhook logs and extract GPS data retroactively
+ */
+router.post('/extract-historical-gps', async (req, res) => {
+  try {
+    logger.info('🔍 Starting historical GPS data extraction from webhook logs');
+
+    const result = await database.extractHistoricalGPSData();
+
+    logger.info('✅ Historical GPS extraction completed:', result);
+
+    res.json({
+      success: true,
+      message: 'Historical GPS data extracted successfully',
+      stats: {
+        webhooks_processed: result.webhooks_processed,
+        gps_positions_extracted: result.gps_positions_extracted,
+        devices_found: result.devices_found
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error extracting historical GPS data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to extract historical GPS data',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;

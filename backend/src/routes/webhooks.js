@@ -7,6 +7,103 @@ const database = require('../models/database');
 
 const router = express.Router();
 
+/**
+ * Extract and save GPS position from webhook payload
+ * Scans for Long/Lat fields, timestamp, and accuracy (PosAcc)
+ */
+async function extractAndSaveGPSPosition(payload, serNo, deviceIMEI, boatNumber = null) {
+  logger.info('🔍 Extracting GPS data from webhook payload:', { SerNo: serNo, IMEI: deviceIMEI });
+
+  try {
+    // Scan payload for GPS data in Records.Fields array
+    let gpsData = null;
+    let gpsTimestamp = null;
+
+    if (payload.Records && Array.isArray(payload.Records)) {
+      for (const record of payload.Records) {
+        if (record.Fields && Array.isArray(record.Fields)) {
+          for (const field of record.Fields) {
+            // Look for GPS coordinates (Long/Lat or Lng/Lat)
+            if ((field.Long !== undefined || field.Lng !== undefined) && field.Lat !== undefined) {
+              gpsData = {
+                latitude: parseFloat(field.Lat),
+                longitude: parseFloat(field.Long || field.Lng),
+                altitude: field.Alt ? parseFloat(field.Alt) : null,
+                speed: field.Spd ? parseFloat(field.Spd) : null,
+                heading: field.Head ? parseFloat(field.Head) : null,
+                accuracy: field.PosAcc ? parseFloat(field.PosAcc) : null, // Position accuracy
+                pdop: field.PDOP ? parseFloat(field.PDOP) : null, // Dilution of precision
+                gpsStatus: field.GpsStat ? parseInt(field.GpsStat) : null
+              };
+
+              // Use GPS timestamp if available, otherwise record timestamp
+              gpsTimestamp = field.GpsUTC || record.DateUTC || new Date().toISOString();
+
+              logger.info('📍 GPS data extracted:', {
+                lat: gpsData.latitude,
+                lng: gpsData.longitude,
+                accuracy: gpsData.accuracy,
+                timestamp: gpsTimestamp,
+                SerNo: serNo
+              });
+
+              break;
+            }
+          }
+          if (gpsData) break;
+        }
+      }
+    }
+
+    // If no GPS data found, return null
+    if (!gpsData || !gpsData.latitude || !gpsData.longitude) {
+      logger.warn('⚠️ No valid GPS coordinates found in webhook payload');
+      return null;
+    }
+
+    // Prepare GPS position data for database
+    const gpsPositionData = {
+      tracker_name: serNo ? serNo.toString() : (deviceIMEI || 'unknown'),
+      kpn_tracker_id: serNo || null,
+      pride_boat_id: boatNumber || null,
+      parade_position: boatNumber || null,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      altitude: gpsData.altitude,
+      accuracy: gpsData.accuracy,
+      speed: gpsData.speed,
+      heading: gpsData.heading,
+      timestamp: new Date(gpsTimestamp),
+      raw_data: {
+        SerNo: serNo,
+        IMEI: deviceIMEI,
+        gpsStatus: gpsData.gpsStatus,
+        pdop: gpsData.pdop,
+        originalPayload: payload
+      }
+    };
+
+    // Save to database
+    const savedId = await database.saveGPSPosition(gpsPositionData);
+
+    logger.info('✅ GPS position saved to database:', {
+      id: savedId,
+      SerNo: serNo,
+      tracker: gpsPositionData.tracker_name,
+      lat: gpsData.latitude,
+      lng: gpsData.longitude,
+      accuracy: gpsData.accuracy,
+      mapped: !!boatNumber
+    });
+
+    return gpsPositionData;
+
+  } catch (error) {
+    logger.error('❌ Error extracting/saving GPS position:', error);
+    throw error;
+  }
+}
+
 // Middleware to log webhook requests (only for actual webhook endpoints, not monitoring)
 async function logWebhookMiddleware(req, res, next) {
   // Skip logging for monitoring endpoints
@@ -370,43 +467,25 @@ router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
     }
 
     // Always save GPS data for later analysis (even unmapped devices)
+    let gpsPositionData = null;
+    let gpsMapped = false;
+
     try {
-      const gpsPositionData = {
-        tracker_name: deviceIMEI || `SerNo_${serNo}`,
-        kpn_tracker_id: serNo || null,
-        pride_boat_id: actualBoatNumber || null,
-        parade_position: actualBoatNumber || null,
-        latitude: gpsData.latitude,
-        longitude: gpsData.longitude,
-        altitude: gpsData.altitude || null,
-        accuracy: gpsData.accuracy || null,
-        speed: gpsData.speed || null,
-        heading: gpsData.heading || null,
-        timestamp: new Date(gpsTimestamp),
-        raw_data: {
+      gpsPositionData = await extractAndSaveGPSPosition(req.body, serNo, deviceIMEI, actualBoatNumber);
+
+      if (gpsPositionData) {
+        gpsMapped = true;
+        logger.info('✅ GPS position saved successfully:', {
           SerNo: serNo,
           IMEI: deviceIMEI,
-          originalPayload: req.body
-        }
-      };
-
-      logger.info('🗺️ Saving GPS position from kpn-gps webhook:', {
-        tracker: gpsPositionData.tracker_name,
-        lat: gpsPositionData.latitude,
-        lng: gpsPositionData.longitude,
-        timestamp: gpsPositionData.timestamp
-      });
-
-      await database.saveGPSPosition(gpsPositionData);
-
-      logger.info('GPS data saved for analysis:', {
-        SerNo: serNo,
-        IMEI: deviceIMEI,
-        boatNumber: actualBoatNumber || 'unmapped',
-        latitude: gpsData.latitude,
-        longitude: gpsData.longitude,
-        timestamp: gpsTimestamp
-      });
+          boatNumber: actualBoatNumber || 'unmapped',
+          latitude: gpsPositionData.latitude,
+          longitude: gpsPositionData.longitude,
+          accuracy: gpsPositionData.accuracy,
+          timestamp: gpsPositionData.timestamp,
+          mapped: !!actualBoatNumber
+        });
+      }
     } catch (saveError) {
       logger.error('Failed to save GPS data for analysis:', saveError);
     }
@@ -431,6 +510,13 @@ router.post('/kpn-gps', logWebhookMiddleware, async (req, res) => {
       success: true,
       bootnummer: actualBoatNumber,
       imei: boat.imei,
+      mapped: gpsMapped, // GPS position successfully saved to database
+      gps: gpsPositionData ? {
+        latitude: gpsPositionData.latitude,
+        longitude: gpsPositionData.longitude,
+        accuracy: gpsPositionData.accuracy,
+        timestamp: gpsPositionData.timestamp
+      } : null,
       processed: {
         timestamp: new Date().toISOString(),
         routeProgress: `${routePosition.progressPercent.toFixed(2)}%`,
@@ -606,45 +692,22 @@ router.post('/tracker-gps', logWebhookMiddleware, async (req, res) => {
         }
 
         // Always save GPS data for later analysis (even unmapped devices)
+        let recordGpsData = null;
         try {
-          const gpsPositionData = {
-            tracker_name: `SerNo_${SerNo}`,
-            kpn_tracker_id: SerNo,
-            pride_boat_id: boatNumber || null,
-            parade_position: boatNumber || null,
-            latitude,
-            longitude,
-            altitude: altitude || null,
-            accuracy: accuracy || null,
-            speed: speed || null,
-            heading: heading || null,
-            timestamp,
-            raw_data: {
+          recordGpsData = await extractAndSaveGPSPosition(req.body, SerNo, IMEI, boatNumber);
+
+          if (recordGpsData) {
+            logger.info('✅ GPS position saved from tracker-gps webhook:', {
               SerNo,
               IMEI,
-              record: record,
-              originalPayload: req.body
-            }
-          };
-
-          logger.info('🗺️ Saving GPS position from tracker-gps webhook:', {
-            tracker: gpsPositionData.tracker_name,
-            lat: gpsPositionData.latitude,
-            lng: gpsPositionData.longitude,
-            timestamp: gpsPositionData.timestamp
-          });
-
-          await database.saveGPSPosition(gpsPositionData);
-
-          logger.info('GPS data saved for analysis:', {
-            SerNo,
-            IMEI,
-            boatNumber: boatNumber || 'unmapped',
-            latitude,
-            longitude,
-            timestamp: timestamp.toISOString(),
-            hasRouteMapping: !!routePosition
-          });
+              boatNumber: boatNumber || 'unmapped',
+              latitude: recordGpsData.latitude,
+              longitude: recordGpsData.longitude,
+              accuracy: recordGpsData.accuracy,
+              timestamp: recordGpsData.timestamp,
+              hasRouteMapping: !!routePosition
+            });
+          }
         } catch (saveError) {
           logger.error('Failed to save GPS data for analysis:', saveError);
         }
@@ -657,7 +720,12 @@ router.post('/tracker-gps', logWebhookMiddleware, async (req, res) => {
           coordinates: [latitude, longitude],
           routeProgress: routePosition?.progressPercent || null,
           boatNumber: boatNumber || null,
-          mapped: !!boatNumber
+          mapped: !!recordGpsData, // GPS successfully saved to database
+          gps: recordGpsData ? {
+            latitude: recordGpsData.latitude,
+            longitude: recordGpsData.longitude,
+            accuracy: recordGpsData.accuracy
+          } : null
         });
 
         logger.debug(`GPS record processed`, {
