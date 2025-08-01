@@ -1682,6 +1682,122 @@ async function getTableData(tableName, limit = 100) {
   }
 }
 
+async function getCleanGPSData(limit = 100) {
+  logger.info(`📍 Getting clean GPS data (limit: ${limit})`);
+
+  if (!pgPool) {
+    logger.warn('❌ No database connection for clean GPS data');
+    return [];
+  }
+
+  try {
+    // Check if gps_clean table exists, if not use gps_positions
+    const tableExistsQuery = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'gps_clean'
+    `;
+    const tableExists = await pgPool.query(tableExistsQuery);
+
+    let query;
+    if (tableExists.rows.length > 0) {
+      // Use gps_clean table
+      query = `
+        SELECT
+          tracker_id,
+          latitude,
+          longitude,
+          accuracy,
+          timestamp
+        FROM gps_clean
+        ORDER BY timestamp DESC
+        LIMIT $1
+      `;
+    } else {
+      // Use gps_positions table
+      query = `
+        SELECT
+          tracker_name as tracker_id,
+          latitude,
+          longitude,
+          accuracy,
+          timestamp
+        FROM gps_positions
+        ORDER BY timestamp DESC
+        LIMIT $1
+      `;
+    }
+
+    const result = await pgPool.query(query, [limit]);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting clean GPS data:', error);
+    throw error;
+  }
+}
+
+async function createGPSCleanTable() {
+  logger.info('🔧 Creating GPS clean table');
+
+  if (!pgPool) {
+    throw new Error('Database not available');
+  }
+
+  try {
+    // Create the gps_clean table
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS gps_clean (
+        id SERIAL PRIMARY KEY,
+        tracker_id VARCHAR(50) NOT NULL,
+        latitude DECIMAL(10, 8) NOT NULL,
+        longitude DECIMAL(11, 8) NOT NULL,
+        accuracy DECIMAL(6, 2),
+        timestamp TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    await pgPool.query(createTableQuery);
+
+    // Create index for performance
+    const createIndexQuery = `
+      CREATE INDEX IF NOT EXISTS idx_gps_clean_tracker_id ON gps_clean(tracker_id);
+      CREATE INDEX IF NOT EXISTS idx_gps_clean_timestamp ON gps_clean(timestamp);
+    `;
+
+    await pgPool.query(createIndexQuery);
+
+    // Migrate existing data from gps_positions
+    const migrateQuery = `
+      INSERT INTO gps_clean (tracker_id, latitude, longitude, accuracy, timestamp)
+      SELECT
+        tracker_name as tracker_id,
+        latitude,
+        longitude,
+        accuracy,
+        timestamp
+      FROM gps_positions
+      WHERE NOT EXISTS (
+        SELECT 1 FROM gps_clean
+        WHERE gps_clean.tracker_id = gps_positions.tracker_name
+        AND gps_clean.timestamp = gps_positions.timestamp
+      )
+    `;
+
+    const migrateResult = await pgPool.query(migrateQuery);
+
+    logger.info(`✅ GPS clean table created and ${migrateResult.rowCount} rows migrated`);
+
+    return {
+      table_created: true,
+      migrated_rows: migrateResult.rowCount
+    };
+  } catch (error) {
+    logger.error('❌ Error creating GPS clean table:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -1734,5 +1850,7 @@ module.exports = {
   redisClient: () => redisClient,
   // Database inspection functions
   getDatabaseStats,
-  getTableData
+  getTableData,
+  getCleanGPSData,
+  createGPSCleanTable
 };

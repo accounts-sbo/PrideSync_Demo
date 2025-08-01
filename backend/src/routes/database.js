@@ -127,4 +127,32 @@ router.post('/create-gps-clean', async (req, res) => {
   }
 });
 
+/**
+ * Initialize Database Tables
+ * POST /api/database/init-tables
+ *
+ * Manually initialize database tables
+ */
+router.post('/init-tables', async (req, res) => {
+  try {
+    logger.info('🔧 Manually initializing database tables');
+
+    // Call the database initialization
+    await database.initializeDatabase();
+
+    res.json({
+      success: true,
+      message: 'Database tables initialized successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Error initializing database tables:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;
