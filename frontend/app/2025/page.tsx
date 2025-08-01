@@ -592,16 +592,22 @@ export default function PrideBoatBallot() {
       const result = await api.voting.getBoats();
 
       if (result.success && result.data.length > 0) {
-        setBoats(result.data);
-        setCurrentBoat(result.data[0]); // Start met eerste boot
+        // Normalize boat data to ensure hearts and stars are always numbers (set to 0)
+        const normalizedBoats = result.data.map((boat: any) => ({
+          ...boat,
+          hearts: 0, // Reset to 0 for clean state
+          stars: 0   // Reset to 0 for clean state
+        }));
+        setBoats(normalizedBoats);
+        setCurrentBoat(normalizedBoats[0]); // Start met eerste boot
       } else {
         // Fallback to mock data if API fails
         const mockBoats: Boat[] = [
-          { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
-          { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
-          { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 },
-          { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 84, stars: 67 },
-          { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 112, stars: 78 }
+          { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 0, stars: 0 },
+          { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 0, stars: 0 },
+          { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 0, stars: 0 },
+          { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 0, stars: 0 },
+          { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 0, stars: 0 }
         ];
         setBoats(mockBoats);
         setCurrentBoat(mockBoats[0]);
@@ -610,9 +616,9 @@ export default function PrideBoatBallot() {
       console.error('Error loading boats:', error);
       // Use mock data as fallback
       const mockBoats: Boat[] = [
-        { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
-        { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
-        { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 }
+        { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 0, stars: 0 },
+        { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 0, stars: 0 },
+        { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 0, stars: 0 }
       ];
       setBoats(mockBoats);
       setCurrentBoat(mockBoats[0]);
@@ -642,7 +648,7 @@ export default function PrideBoatBallot() {
         boat.id === boatId
           ? {
               ...boat,
-              [voteType === 'heart' ? 'hearts' : 'stars']: boat[voteType === 'heart' ? 'hearts' : 'stars'] + 1
+              [voteType === 'heart' ? 'hearts' : 'stars']: (boat[voteType === 'heart' ? 'hearts' : 'stars'] || 0) + 1
             }
           : boat
       ));
@@ -957,7 +963,7 @@ export default function PrideBoatBallot() {
       // Update local state optimistically with pulse animation
       setBoats(boats.map(boat =>
         boat.id === currentBoat.id
-          ? { ...boat, hearts: boat.hearts + 1 }
+          ? { ...boat, hearts: (boat.hearts || 0) + 1 }
           : boat
       ));
 
@@ -1023,7 +1029,7 @@ export default function PrideBoatBallot() {
       // Update local state optimistically
       setBoats(boats.map(boat =>
         boat.id === currentBoat.id
-          ? { ...boat, stars: boat.stars + 1 }
+          ? { ...boat, stars: (boat.stars || 0) + 1 }
           : boat
       ));
 
@@ -1092,7 +1098,7 @@ export default function PrideBoatBallot() {
     setCurrentBoat(boats[nextIndex]);
   };
 
-  const sortedBoats = [...boats].sort((a, b) => b.stars - a.stars);
+  const sortedBoats = [...boats].sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
   // Idea form component
   const IdeaForm = ({ onSubmit }: { onSubmit: (idea: string, email: string) => void }) => {
@@ -1481,11 +1487,11 @@ export default function PrideBoatBallot() {
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-1 heart-counter">
                 <span>💖</span>
-                <span className="font-semibold">{currentBoat.hearts}</span>
+                <span className="font-semibold">{currentBoat.hearts || 0}</span>
               </div>
               <div className="flex items-center space-x-1 star-counter">
                 <span>⭐</span>
-                <span className="font-semibold">{currentBoat.stars}</span>
+                <span className="font-semibold">{currentBoat.stars || 0}</span>
               </div>
             </div>
 
@@ -1621,8 +1627,8 @@ export default function PrideBoatBallot() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <div className="text-right mr-2">
-                          <div className="font-bold text-purple-600 text-sm">{boat.stars} ⭐</div>
-                          <div className="text-xs text-gray-500">{boat.hearts} 💖</div>
+                          <div className="font-bold text-purple-600 text-sm">{boat.stars || 0} ⭐</div>
+                          <div className="text-xs text-gray-500">{boat.hearts || 0} 💖</div>
                         </div>
                         {/* Voting buttons */}
                         <div className="flex flex-col space-y-1">
