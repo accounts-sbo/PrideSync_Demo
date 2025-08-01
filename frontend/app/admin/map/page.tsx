@@ -31,11 +31,8 @@ export default function LiveMapPage() {
 
   const fetchGPSPositions = async () => {
     try {
-      const backendUrl = process.env.NODE_ENV === 'production'
-        ? 'https://pridesyncdemo-production.up.railway.app'
-        : 'http://localhost:3001';
-
-      const response = await fetch(`${backendUrl}/api/webhooks/gps-positions`);
+      // Use Next.js API route proxy instead of direct backend call
+      const response = await fetch('/api/webhooks/gps-positions');
       const data = await response.json();
 
       if (data.success) {
