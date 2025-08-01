@@ -1,7 +1,23 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const logger = require('../services/logger');
 const database = require('../models/database');
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.mimetype === 'text/plain' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  }
+});
 
 /**
  * Get Database Statistics
@@ -178,6 +194,56 @@ router.post('/force-create-tables', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Upload Boats CSV
+ * POST /api/database/upload-boats-csv
+ *
+ * Upload CSV file with boats and tracker mappings
+ */
+router.post('/upload-boats-csv', upload.single('csv'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No CSV file uploaded',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    logger.info('📁 Processing CSV upload:', {
+      filename: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+
+    // Parse CSV content
+    const csvContent = req.file.buffer.toString('utf-8');
+    const result = await database.processBoatsCSV(csvContent);
+
+    logger.info('✅ CSV processed successfully:', result);
+
+    res.json({
+      success: true,
+      message: `Successfully processed ${result.total_rows} boats from CSV`,
+      stats: {
+        pride_boats: result.pride_boats_created,
+        kpn_trackers: result.kpn_trackers_created,
+        mappings: result.mappings_created
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error processing CSV upload:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process CSV file',
+      message: error.message,
       timestamp: new Date().toISOString()
     });
   }

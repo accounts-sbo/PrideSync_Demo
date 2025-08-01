@@ -1990,6 +1990,159 @@ async function forceCreateTables() {
   }
 }
 
+async function processBoatsCSV(csvContent) {
+  logger.info('📊 Processing boats CSV data');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Parse CSV content (tab-separated)
+    const lines = csvContent.trim().split('\n');
+    const headers = lines[0].split('\t');
+
+    logger.info('📋 CSV headers detected:', headers);
+
+    // Expected headers: Naam, Nr, TRACKER ID, Organisatie/Boot, Thema/Korte beschrijving, P nummers KPN
+    const expectedHeaders = ['Naam', 'Nr', 'TRACKER ID', 'Organisatie/Boot', 'Thema/Korte beschrijving', 'P nummers KPN'];
+
+    // Validate headers
+    const missingHeaders = expectedHeaders.filter(header => !headers.includes(header));
+    if (missingHeaders.length > 0) {
+      throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+    }
+
+    const client = await pgPool.connect();
+    let prideBoatsCreated = 0;
+    let kpnTrackersCreated = 0;
+    let mappingsCreated = 0;
+
+    try {
+      await client.query('BEGIN');
+
+      // Process each data row (skip header)
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue; // Skip empty lines
+
+        const values = line.split('\t');
+        if (values.length < 6) {
+          logger.warn(`⚠️ Skipping row ${i + 1}: insufficient columns`);
+          continue;
+        }
+
+        const rowData = {
+          naam: values[0]?.trim(),
+          nr: parseInt(values[1]?.trim()) || 0,
+          trackerId: values[2]?.trim(),
+          organisatie: values[3]?.trim(),
+          thema: values[4]?.trim(),
+          pNummer: values[5]?.trim()
+        };
+
+        logger.debug(`Processing row ${i + 1}:`, rowData);
+
+        // 1. Create/update Pride Boat
+        const prideBoatQuery = `
+          INSERT INTO pride_boats (parade_position, boat_name, organisation, theme, description, status)
+          VALUES ($1, $2, $3, $4, $5, 'registered')
+          ON CONFLICT (parade_position)
+          DO UPDATE SET
+            boat_name = EXCLUDED.boat_name,
+            organisation = EXCLUDED.organisation,
+            theme = EXCLUDED.theme,
+            description = EXCLUDED.description,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        const prideBoatResult = await client.query(prideBoatQuery, [
+          rowData.nr,
+          rowData.naam,
+          rowData.organisatie,
+          rowData.organisatie, // Use organisation as theme for now
+          rowData.thema
+        ]);
+
+        const prideBoatId = prideBoatResult.rows[0].id;
+        prideBoatsCreated++;
+
+        // 2. Create/update KPN Tracker
+        const kpnTrackerQuery = `
+          INSERT INTO kpn_trackers (tracker_name, asset_code, asset_type, description, enabled)
+          VALUES ($1, $2, 'Boat', $3, true)
+          ON CONFLICT (tracker_name)
+          DO UPDATE SET
+            asset_code = EXCLUDED.asset_code,
+            description = EXCLUDED.description,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        const kpnTrackerResult = await client.query(kpnTrackerQuery, [
+          rowData.trackerId,
+          rowData.pNummer,
+          `${rowData.organisatie} - ${rowData.thema}`
+        ]);
+
+        const kpnTrackerId = kpnTrackerResult.rows[0].id;
+        kpnTrackersCreated++;
+
+        // 3. Create/update Boat-Tracker Mapping
+        const mappingQuery = `
+          INSERT INTO boat_tracker_mappings (
+            pride_boat_id, kpn_tracker_id, parade_position, tracker_name, asset_code, is_active, notes
+          )
+          VALUES ($1, $2, $3, $4, $5, true, $6)
+          ON CONFLICT (pride_boat_id, is_active)
+          DO UPDATE SET
+            kpn_tracker_id = EXCLUDED.kpn_tracker_id,
+            tracker_name = EXCLUDED.tracker_name,
+            asset_code = EXCLUDED.asset_code,
+            notes = EXCLUDED.notes,
+            mapped_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        await client.query(mappingQuery, [
+          prideBoatId,
+          kpnTrackerId,
+          rowData.nr,
+          rowData.trackerId,
+          rowData.pNummer,
+          `CSV import: ${rowData.naam}`
+        ]);
+
+        mappingsCreated++;
+      }
+
+      await client.query('COMMIT');
+
+      const result = {
+        success: true,
+        total_rows: lines.length - 1, // Exclude header
+        pride_boats_created: prideBoatsCreated,
+        kpn_trackers_created: kpnTrackersCreated,
+        mappings_created: mappingsCreated
+      };
+
+      logger.info('✅ CSV processing completed:', result);
+      return result;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    logger.error('❌ Error processing boats CSV:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -2045,5 +2198,6 @@ module.exports = {
   getTableData,
   getCleanGPSData,
   createGPSCleanTable,
-  forceCreateTables
+  forceCreateTables,
+  processBoatsCSV
 };
