@@ -127,6 +127,7 @@ export default function PrideBoatBallot() {
   const [heartAnimations, setHeartAnimations] = useState<Array<{id: string, x: number, y: number}>>([]);
   const [lastHeartTime, setLastHeartTime] = useState(0);
   const [isHeartCooldown, setIsHeartCooldown] = useState(false);
+  const [votingInProgress, setVotingInProgress] = useState(false);
 
   // Star animation state
   const [starAnimations, setStarAnimations] = useState<Array<{id: string, x: number, y: number}>>([]);
