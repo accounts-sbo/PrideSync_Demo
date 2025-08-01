@@ -49,6 +49,12 @@ export default function AdminLayout({
               >
                 Database
               </Link>
+              <Link
+                href="/admin/upload"
+                className="text-gray-600 hover:text-gray-900 font-medium transition-colors"
+              >
+                CSV Upload
+              </Link>
               <Link 
                 href="/" 
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"

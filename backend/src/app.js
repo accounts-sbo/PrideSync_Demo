@@ -18,6 +18,8 @@ const locationRoutes = require('./routes/locations');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Force restart to pick up new DATABASE_URL and GPS extraction code - Deploy trigger v2
+
 // Trust proxy for Railway deployment (fixes X-Forwarded-For warnings)
 app.set('trust proxy', 1);
 

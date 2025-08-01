@@ -1,7 +1,23 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const logger = require('../services/logger');
 const database = require('../models/database');
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.mimetype === 'text/plain' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  }
+});
 
 /**
  * Get Database Statistics
@@ -150,6 +166,180 @@ router.post('/init-tables', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Force Create Tables
+ * POST /api/database/force-create-tables
+ *
+ * Force create all database tables with direct SQL
+ */
+router.post('/force-create-tables', async (req, res) => {
+  try {
+    logger.info('🔧 Force creating database tables with direct SQL');
+
+    const result = await database.forceCreateTables();
+
+    res.json({
+      success: true,
+      message: 'Database tables force created successfully',
+      result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Error force creating database tables:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Upload Boats CSV
+ * POST /api/database/upload-boats-csv
+ *
+ * Upload CSV file with boats and tracker mappings
+ */
+router.post('/upload-boats-csv', upload.single('csv'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No CSV file uploaded',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    logger.info('📁 Processing CSV upload:', {
+      filename: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+
+    // Parse CSV content
+    const csvContent = req.file.buffer.toString('utf-8');
+    const result = await database.processBoatsCSV(csvContent);
+
+    logger.info('✅ CSV processed successfully:', result);
+
+    res.json({
+      success: true,
+      message: `Successfully processed ${result.total_rows} boats from CSV`,
+      stats: {
+        pride_boats: result.pride_boats_created,
+        kpn_trackers: result.kpn_trackers_created,
+        mappings: result.mappings_created
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error processing CSV upload:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process CSV file',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Extract GPS Data from Historical Webhooks
+ * POST /api/database/extract-historical-gps
+ *
+ * Analyze existing webhook logs and extract GPS data retroactively
+ */
+router.post('/extract-historical-gps', async (req, res) => {
+  try {
+    logger.info('🔍 Starting historical GPS data extraction from webhook logs');
+
+    const result = await database.extractHistoricalGPSData();
+
+    logger.info('✅ Historical GPS extraction completed:', result);
+
+    res.json({
+      success: true,
+      message: 'Historical GPS data extracted successfully',
+      stats: {
+        webhooks_processed: result.webhooks_processed,
+        gps_positions_extracted: result.gps_positions_extracted,
+        devices_found: result.devices_found
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error extracting historical GPS data:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to extract historical GPS data',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Force GPS Extraction from Webhook Logs
+ * POST /api/database/force-gps-extraction
+ *
+ * Direct GPS extraction with detailed logging
+ */
+router.post('/force-gps-extraction', async (req, res) => {
+  try {
+    logger.info('🚀 Force GPS extraction starting...');
+
+    const result = await database.forceExtractGPSFromWebhooks();
+
+    res.json({
+      success: true,
+      message: 'Force GPS extraction completed',
+      stats: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error in force GPS extraction:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force extract GPS data',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Test GPS Insert
+ * POST /api/database/test-gps-insert
+ *
+ * Test direct GPS position insert to debug table issues
+ */
+router.post('/test-gps-insert', async (req, res) => {
+  try {
+    logger.info('🧪 Testing direct GPS insert...');
+
+    const result = await database.testGPSInsert();
+
+    res.json({
+      success: true,
+      message: 'Test GPS insert completed',
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Error in test GPS insert:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test GPS insert',
+      message: error.message,
       timestamp: new Date().toISOString()
     });
   }

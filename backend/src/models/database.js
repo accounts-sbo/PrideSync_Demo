@@ -1852,6 +1852,780 @@ async function createGPSCleanTable() {
   }
 }
 
+async function forceCreateTables() {
+  logger.info('🔧 Force creating all database tables');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // First, check if we can connect to the database
+    const testQuery = 'SELECT NOW() as current_time';
+    const testResult = await pgPool.query(testQuery);
+    logger.info('✅ Database connection verified:', testResult.rows[0]);
+
+    // Create all tables with explicit SQL
+    const createTablesSQL = `
+      -- Pride Boats table
+      CREATE TABLE IF NOT EXISTS pride_boats (
+        id SERIAL PRIMARY KEY,
+        parade_position INTEGER UNIQUE NOT NULL,
+        boat_name VARCHAR(255) NOT NULL,
+        organisation VARCHAR(255),
+        theme TEXT,
+        description TEXT,
+        captain_name VARCHAR(255),
+        captain_phone VARCHAR(20),
+        captain_email VARCHAR(255),
+        boat_type VARCHAR(100),
+        length_meters DECIMAL(5,2),
+        width_meters DECIMAL(5,2),
+        max_persons INTEGER,
+        status VARCHAR(50) DEFAULT 'registered',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- KPN Trackers table
+      CREATE TABLE IF NOT EXISTS kpn_trackers (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50) UNIQUE NOT NULL,
+        asset_code VARCHAR(20) NOT NULL,
+        asset_type VARCHAR(50) DEFAULT 'Boat',
+        device_type VARCHAR(100),
+        serial_number VARCHAR(50),
+        imei VARCHAR(20),
+        enabled BOOLEAN DEFAULT true,
+        last_connected TIMESTAMP,
+        last_trip TIMESTAMP,
+        current_status VARCHAR(100),
+        odometer_km DECIMAL(10,2),
+        run_hours DECIMAL(10,2),
+        project VARCHAR(50),
+        department VARCHAR(50),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Boat-Tracker Mappings
+      CREATE TABLE IF NOT EXISTS boat_tracker_mappings (
+        id SERIAL PRIMARY KEY,
+        pride_boat_id INTEGER,
+        kpn_tracker_id INTEGER,
+        parade_position INTEGER,
+        tracker_name VARCHAR(50),
+        asset_code VARCHAR(20),
+        is_active BOOLEAN DEFAULT true,
+        mapped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        mapped_by VARCHAR(100),
+        notes TEXT,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE CASCADE,
+        FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE,
+        UNIQUE(pride_boat_id, is_active)
+      );
+
+      -- Votes table
+      CREATE TABLE IF NOT EXISTS votes (
+        id SERIAL PRIMARY KEY,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        vote_type VARCHAR(10) CHECK(vote_type IN ('heart', 'star')),
+        user_session VARCHAR(255),
+        ip_address INET,
+        user_agent TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+        FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE
+      );
+
+      -- GPS Positions table
+      CREATE TABLE IF NOT EXISTS gps_positions (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50) NOT NULL,
+        kpn_tracker_id INTEGER,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        latitude DECIMAL(10, 8) NOT NULL,
+        longitude DECIMAL(11, 8) NOT NULL,
+        route_distance INTEGER DEFAULT 0,
+        route_progress DECIMAL(5, 2) DEFAULT 0,
+        speed DECIMAL(5, 2) DEFAULT 0,
+        heading INTEGER DEFAULT 0,
+        distance_from_route DECIMAL(6, 2) DEFAULT 0,
+        altitude DECIMAL(8, 2),
+        accuracy DECIMAL(6, 2),
+        timestamp TIMESTAMP NOT NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        raw_data JSONB,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
+      );
+
+      -- Incidents table
+      CREATE TABLE IF NOT EXISTS incidents (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50),
+        kpn_tracker_id INTEGER,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        incident_type VARCHAR(100) NOT NULL,
+        severity VARCHAR(20) DEFAULT 'info',
+        message TEXT,
+        metadata JSONB,
+        timestamp TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
+      );
+
+      -- Webhook logs table (CRITICAL for KPN monitoring)
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id SERIAL PRIMARY KEY,
+        endpoint VARCHAR(100) NOT NULL,
+        method VARCHAR(10) NOT NULL,
+        headers JSONB,
+        body JSONB,
+        query_params JSONB,
+        ip_address INET,
+        user_agent TEXT,
+        response_status INTEGER,
+        response_body JSONB,
+        processing_time_ms INTEGER,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    // Execute the table creation
+    await pgPool.query(createTablesSQL);
+    logger.info('✅ All tables created successfully');
+
+    // Create indexes
+    const createIndexesSQL = `
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_name ON gps_positions(tracker_name);
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp ON gps_positions(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_pride_boat ON gps_positions(pride_boat_id);
+      CREATE INDEX IF NOT EXISTS idx_boat_tracker_mappings_active ON boat_tracker_mappings(is_active);
+      CREATE INDEX IF NOT EXISTS idx_kpn_trackers_asset_code ON kpn_trackers(asset_code);
+      CREATE INDEX IF NOT EXISTS idx_pride_boats_position ON pride_boats(parade_position);
+      CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint);
+      CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at);
+    `;
+
+    await pgPool.query(createIndexesSQL);
+    logger.info('✅ All indexes created successfully');
+
+    // Verify tables were created
+    const verifyQuery = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `;
+    const verifyResult = await pgPool.query(verifyQuery);
+    const tableNames = verifyResult.rows.map(row => row.table_name);
+
+    logger.info('✅ Database tables verified:', tableNames);
+
+    return {
+      success: true,
+      tables_created: tableNames,
+      total_tables: tableNames.length,
+      message: 'All database tables force created successfully'
+    };
+
+  } catch (error) {
+    logger.error('❌ Error force creating database tables:', error);
+    throw error;
+  }
+}
+
+async function processBoatsCSV(csvContent) {
+  logger.info('📊 Processing boats CSV data');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Parse CSV content (detect separator)
+    const lines = csvContent.trim().split('\n');
+    if (lines.length < 2) {
+      throw new Error('CSV must contain at least a header row and one data row');
+    }
+
+    // Auto-detect separator (tab or comma)
+    const firstLine = lines[0];
+    const separator = firstLine.includes('\t') ? '\t' : ',';
+    logger.info(`📋 Detected CSV separator: ${separator === '\t' ? 'TAB' : 'COMMA'}`);
+
+    const headers = firstLine.split(separator).map(h => h.trim());
+    logger.info('📋 CSV headers detected:', headers);
+
+    // Create column mapping - flexible field detection
+    const columnMap = createColumnMapping(headers);
+    logger.info('🗺️ Column mapping created:', columnMap);
+
+    // Validate that we have minimum required fields
+    if (!columnMap.name && !columnMap.organisation) {
+      throw new Error('CSV must contain at least a name or organisation column');
+    }
+    if (!columnMap.trackerId) {
+      throw new Error('CSV must contain a tracker ID column');
+    }
+
+    const client = await pgPool.connect();
+    let prideBoatsCreated = 0;
+    let kpnTrackersCreated = 0;
+    let mappingsCreated = 0;
+
+    try {
+      await client.query('BEGIN');
+
+      // Process each data row (skip header)
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue; // Skip empty lines
+
+        const values = line.split(separator).map(v => v?.trim());
+        if (values.length < headers.length / 2) {
+          logger.warn(`⚠️ Skipping row ${i + 1}: insufficient columns (${values.length}/${headers.length})`);
+          continue;
+        }
+
+        // Extract data using flexible column mapping
+        const rowData = extractRowData(values, columnMap, headers);
+
+        if (!rowData.trackerId) {
+          logger.warn(`⚠️ Skipping row ${i + 1}: missing tracker ID`);
+          continue;
+        }
+
+        logger.debug(`Processing row ${i + 1}:`, rowData);
+
+        // 1. Create/update Pride Boat
+        const prideBoatQuery = `
+          INSERT INTO pride_boats (parade_position, boat_name, organisation, theme, description, status)
+          VALUES ($1, $2, $3, $4, $5, 'registered')
+          ON CONFLICT (parade_position)
+          DO UPDATE SET
+            boat_name = EXCLUDED.boat_name,
+            organisation = EXCLUDED.organisation,
+            theme = EXCLUDED.theme,
+            description = EXCLUDED.description,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        const prideBoatResult = await client.query(prideBoatQuery, [
+          rowData.position || 0,
+          rowData.name || rowData.organisation || 'Unknown',
+          rowData.organisation || rowData.name || 'Unknown',
+          rowData.theme || rowData.organisation || '',
+          rowData.description || rowData.theme || ''
+        ]);
+
+        const prideBoatId = prideBoatResult.rows[0].id;
+        prideBoatsCreated++;
+
+        // 2. Create/update KPN Tracker
+        const kpnTrackerQuery = `
+          INSERT INTO kpn_trackers (tracker_name, asset_code, asset_type, description, enabled)
+          VALUES ($1, $2, 'Boat', $3, true)
+          ON CONFLICT (tracker_name)
+          DO UPDATE SET
+            asset_code = EXCLUDED.asset_code,
+            description = EXCLUDED.description,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        const kpnTrackerResult = await client.query(kpnTrackerQuery, [
+          rowData.trackerId,
+          rowData.assetCode || `T${rowData.trackerId}`,
+          `${rowData.organisation || rowData.name} - ${rowData.description || rowData.theme || ''}`
+        ]);
+
+        const kpnTrackerId = kpnTrackerResult.rows[0].id;
+        kpnTrackersCreated++;
+
+        // 3. Create/update Boat-Tracker Mapping
+        const mappingQuery = `
+          INSERT INTO boat_tracker_mappings (
+            pride_boat_id, kpn_tracker_id, parade_position, tracker_name, asset_code, is_active, notes
+          )
+          VALUES ($1, $2, $3, $4, $5, true, $6)
+          ON CONFLICT (pride_boat_id, is_active)
+          DO UPDATE SET
+            kpn_tracker_id = EXCLUDED.kpn_tracker_id,
+            tracker_name = EXCLUDED.tracker_name,
+            asset_code = EXCLUDED.asset_code,
+            notes = EXCLUDED.notes,
+            mapped_at = CURRENT_TIMESTAMP
+          RETURNING id;
+        `;
+
+        await client.query(mappingQuery, [
+          prideBoatId,
+          kpnTrackerId,
+          rowData.position || 0,
+          rowData.trackerId,
+          rowData.assetCode || `T${rowData.trackerId}`,
+          `CSV import: ${rowData.name || rowData.organisation}`
+        ]);
+
+        mappingsCreated++;
+      }
+
+      await client.query('COMMIT');
+
+      const result = {
+        success: true,
+        total_rows: lines.length - 1, // Exclude header
+        pride_boats_created: prideBoatsCreated,
+        kpn_trackers_created: kpnTrackersCreated,
+        mappings_created: mappingsCreated
+      };
+
+      logger.info('✅ CSV processing completed:', result);
+      return result;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    logger.error('❌ Error processing boats CSV:', error);
+    throw error;
+  }
+}
+
+// Helper function to create flexible column mapping
+function createColumnMapping(headers) {
+  const mapping = {};
+
+  headers.forEach((header, index) => {
+    const normalizedHeader = header.toLowerCase().trim();
+
+    // Name/Naam mapping
+    if (normalizedHeader.includes('naam') || normalizedHeader.includes('name') || normalizedHeader === 'boat_name') {
+      mapping.name = index;
+    }
+
+    // Position/Nr mapping
+    if (normalizedHeader.includes('nr') || normalizedHeader.includes('position') || normalizedHeader.includes('pos')) {
+      mapping.position = index;
+    }
+
+    // Tracker ID mapping
+    if (normalizedHeader.includes('tracker') && normalizedHeader.includes('id')) {
+      mapping.trackerId = index;
+    }
+
+    // Organisation mapping
+    if (normalizedHeader.includes('organisatie') || normalizedHeader.includes('organisation') || normalizedHeader.includes('boot')) {
+      mapping.organisation = index;
+    }
+
+    // Theme/Description mapping
+    if (normalizedHeader.includes('thema') || normalizedHeader.includes('theme') || normalizedHeader.includes('beschrijving') || normalizedHeader.includes('description')) {
+      mapping.theme = index;
+      if (!mapping.description) mapping.description = index;
+    }
+
+    // Asset code mapping (P numbers)
+    if (normalizedHeader.includes('p nummer') || normalizedHeader.includes('asset') || normalizedHeader.includes('code')) {
+      mapping.assetCode = index;
+    }
+
+    // IMEI mapping
+    if (normalizedHeader.includes('imei')) {
+      mapping.imei = index;
+    }
+
+    // Captain mapping
+    if (normalizedHeader.includes('captain') || normalizedHeader.includes('kapitein')) {
+      mapping.captain = index;
+    }
+  });
+
+  return mapping;
+}
+
+// Helper function to extract row data using column mapping
+function extractRowData(values, columnMap, headers) {
+  const data = {};
+
+  // Extract mapped fields
+  if (columnMap.name !== undefined) data.name = values[columnMap.name];
+  if (columnMap.position !== undefined) data.position = parseInt(values[columnMap.position]) || 0;
+  if (columnMap.trackerId !== undefined) data.trackerId = values[columnMap.trackerId];
+  if (columnMap.organisation !== undefined) data.organisation = values[columnMap.organisation];
+  if (columnMap.theme !== undefined) data.theme = values[columnMap.theme];
+  if (columnMap.description !== undefined) data.description = values[columnMap.description];
+  if (columnMap.assetCode !== undefined) data.assetCode = values[columnMap.assetCode];
+  if (columnMap.imei !== undefined) data.imei = values[columnMap.imei];
+  if (columnMap.captain !== undefined) data.captain = values[columnMap.captain];
+
+  // Fallbacks and cleanup
+  data.name = data.name || data.organisation || 'Unknown';
+  data.organisation = data.organisation || data.name || 'Unknown';
+  data.description = data.description || data.theme || '';
+  data.theme = data.theme || data.organisation || '';
+
+  return data;
+}
+
+async function extractHistoricalGPSData() {
+  logger.info('🔍 Extracting GPS data from historical webhook logs');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Get all webhook logs that contain GPS data
+    const webhookQuery = `
+      SELECT id, endpoint, body, created_at
+      FROM webhook_logs
+      WHERE (endpoint LIKE '%gps%' OR endpoint LIKE '%tracker%')
+      AND body IS NOT NULL
+      AND body::text LIKE '%Records%'
+      AND body::text LIKE '%Lat%'
+      ORDER BY created_at DESC
+    `;
+
+    const webhookResult = await pgPool.query(webhookQuery);
+    const webhooks = webhookResult.rows;
+
+    logger.info(`📊 Found ${webhooks.length} webhook logs with potential GPS data`);
+
+    let webhooksProcessed = 0;
+    let gpsPositionsExtracted = 0;
+    const devicesFound = new Set();
+
+    const client = await pgPool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      for (const webhook of webhooks) {
+        try {
+          const payload = webhook.body;
+
+          // Extract SerNo and IMEI from payload
+          const serNo = payload.SerNo;
+          const imei = payload.IMEI;
+
+          if (!serNo) {
+            continue; // Skip if no SerNo
+          }
+
+          devicesFound.add(serNo);
+
+          // Extract GPS data from Records.Fields
+          if (payload.Records && Array.isArray(payload.Records)) {
+            for (const record of payload.Records) {
+              if (record.Fields && Array.isArray(record.Fields)) {
+                for (const field of record.Fields) {
+                  // Look for GPS coordinates
+                  if ((field.Long !== undefined || field.Lng !== undefined) && field.Lat !== undefined) {
+
+                    const gpsData = {
+                      latitude: parseFloat(field.Lat),
+                      longitude: parseFloat(field.Long || field.Lng),
+                      altitude: field.Alt ? parseFloat(field.Alt) : null,
+                      speed: field.Spd ? parseFloat(field.Spd) : null,
+                      heading: field.Head ? parseFloat(field.Head) : null,
+                      accuracy: field.PosAcc ? parseFloat(field.PosAcc) : null,
+                      pdop: field.PDOP ? parseFloat(field.PDOP) : null,
+                      gpsStatus: field.GpsStat ? parseInt(field.GpsStat) : null
+                    };
+
+                    // Use GPS timestamp if available, otherwise record timestamp, otherwise webhook timestamp
+                    const gpsTimestamp = field.GpsUTC || record.DateUTC || webhook.created_at;
+
+                    // Check if this GPS position already exists (avoid duplicates)
+                    const existsQuery = `
+                      SELECT id FROM gps_positions
+                      WHERE tracker_name = $1
+                      AND latitude = $2
+                      AND longitude = $3
+                      AND timestamp = $4
+                    `;
+
+                    const existsResult = await client.query(existsQuery, [
+                      serNo.toString(),
+                      gpsData.latitude,
+                      gpsData.longitude,
+                      new Date(gpsTimestamp)
+                    ]);
+
+                    if (existsResult.rows.length > 0) {
+                      continue; // Skip duplicate
+                    }
+
+                    // Insert GPS position
+                    const insertQuery = `
+                      INSERT INTO gps_positions (
+                        tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+                        latitude, longitude, altitude, accuracy, speed, heading,
+                        timestamp, raw_data
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                      RETURNING id
+                    `;
+
+                    const insertValues = [
+                      serNo.toString(),
+                      serNo,
+                      null, // Will be mapped later when boat mappings are available
+                      null,
+                      gpsData.latitude,
+                      gpsData.longitude,
+                      gpsData.altitude,
+                      gpsData.accuracy,
+                      gpsData.speed,
+                      gpsData.heading,
+                      new Date(gpsTimestamp),
+                      JSON.stringify({
+                        SerNo: serNo,
+                        IMEI: imei,
+                        gpsStatus: gpsData.gpsStatus,
+                        pdop: gpsData.pdop,
+                        extractedFrom: 'historical_webhook',
+                        webhookId: webhook.id,
+                        originalPayload: payload
+                      })
+                    ];
+
+                    const insertResult = await client.query(insertQuery, insertValues);
+                    gpsPositionsExtracted++;
+
+                    logger.debug('📍 Historical GPS position extracted:', {
+                      id: insertResult.rows[0].id,
+                      SerNo: serNo,
+                      lat: gpsData.latitude,
+                      lng: gpsData.longitude,
+                      timestamp: gpsTimestamp
+                    });
+                  }
+                }
+              }
+            }
+          }
+
+          webhooksProcessed++;
+
+        } catch (recordError) {
+          logger.warn(`⚠️ Error processing webhook ${webhook.id}:`, recordError.message);
+          // Continue with next webhook
+        }
+      }
+
+      await client.query('COMMIT');
+
+      const result = {
+        webhooks_processed: webhooksProcessed,
+        gps_positions_extracted: gpsPositionsExtracted,
+        devices_found: devicesFound.size
+      };
+
+      logger.info('✅ Historical GPS extraction completed:', result);
+      return result;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+  } catch (error) {
+    logger.error('❌ Error extracting historical GPS data:', error);
+    throw error;
+  }
+}
+
+async function forceExtractGPSFromWebhooks() {
+  logger.info('🚀 Force GPS extraction from webhook logs');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Get webhook logs directly
+    const webhookQuery = `
+      SELECT id, endpoint, body, created_at
+      FROM webhook_logs
+      WHERE endpoint LIKE '%gps%'
+      AND body IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 50
+    `;
+
+    const webhookResult = await pgPool.query(webhookQuery);
+    const webhooks = webhookResult.rows;
+
+    logger.info(`📊 Found ${webhooks.length} webhook logs to process`);
+
+    let extracted = 0;
+    const devices = new Set();
+
+    for (const webhook of webhooks) {
+      try {
+        const payload = webhook.body;
+        const serNo = payload.SerNo;
+        const imei = payload.IMEI;
+
+        if (!serNo) continue;
+        devices.add(serNo);
+
+        logger.info(`🔍 Processing webhook ${webhook.id} for SerNo ${serNo}`);
+
+        // Extract GPS from Records.Fields
+        if (payload.Records && Array.isArray(payload.Records)) {
+          for (const record of payload.Records) {
+            if (record.Fields && Array.isArray(record.Fields)) {
+              for (const field of record.Fields) {
+                if (field.Lat !== undefined && (field.Long !== undefined || field.Lng !== undefined)) {
+
+                  logger.info(`📍 Found GPS data: Lat ${field.Lat}, Long ${field.Long || field.Lng}, PosAcc ${field.PosAcc}`);
+
+                  // Check if already exists
+                  const existsQuery = `
+                    SELECT id FROM gps_positions
+                    WHERE tracker_name = $1
+                    AND latitude = $2
+                    AND longitude = $3
+                    AND timestamp = $4
+                  `;
+
+                  const gpsTimestamp = field.GpsUTC || record.DateUTC || webhook.created_at;
+                  const existsResult = await pgPool.query(existsQuery, [
+                    serNo.toString(),
+                    parseFloat(field.Lat),
+                    parseFloat(field.Long || field.Lng),
+                    new Date(gpsTimestamp)
+                  ]);
+
+                  if (existsResult.rows.length > 0) {
+                    logger.info(`⚠️ GPS position already exists, skipping`);
+                    continue; // Skip duplicate
+                  }
+
+                  // Insert GPS position
+                  const insertQuery = `
+                    INSERT INTO gps_positions (
+                      tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+                      latitude, longitude, altitude, accuracy, speed, heading,
+                      timestamp, raw_data
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    RETURNING id
+                  `;
+
+                  const insertValues = [
+                    serNo.toString(),
+                    serNo,
+                    null,
+                    null,
+                    parseFloat(field.Lat),
+                    parseFloat(field.Long || field.Lng),
+                    field.Alt ? parseFloat(field.Alt) : null,
+                    field.PosAcc ? parseFloat(field.PosAcc) : null,
+                    field.Spd ? parseFloat(field.Spd) : null,
+                    field.Head ? parseFloat(field.Head) : null,
+                    new Date(gpsTimestamp),
+                    JSON.stringify({
+                      SerNo: serNo,
+                      IMEI: imei,
+                      extractedFrom: 'force_extraction',
+                      webhookId: webhook.id,
+                      originalField: field
+                    })
+                  ];
+
+                  const insertResult = await pgPool.query(insertQuery, insertValues);
+                  extracted++;
+
+                  logger.info(`✅ GPS extracted and saved with ID ${insertResult.rows[0].id}: SerNo ${serNo}, Lat ${field.Lat}, Long ${field.Long || field.Lng}, PosAcc ${field.PosAcc}`);
+                }
+              }
+            }
+          }
+        }
+      } catch (recordError) {
+        logger.error(`❌ Error processing webhook ${webhook.id}:`, recordError);
+      }
+    }
+
+    const result = {
+      webhooks_processed: webhooks.length,
+      gps_positions_extracted: extracted,
+      devices_found: devices.size
+    };
+
+    logger.info('✅ Force GPS extraction completed:', result);
+    return result;
+
+  } catch (error) {
+    logger.error('❌ Error in force GPS extraction:', error);
+    throw error;
+  }
+}
+
+async function testGPSInsert() {
+  logger.info('🧪 Testing direct GPS insert');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Test simple insert
+    const insertQuery = `
+      INSERT INTO gps_positions (
+        tracker_name, kpn_tracker_id, latitude, longitude,
+        accuracy, timestamp, raw_data
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, tracker_name, latitude, longitude
+    `;
+
+    const testValues = [
+      'TEST_1424493',
+      1424493,
+      52.3676,
+      4.9041,
+      25,
+      new Date(),
+      JSON.stringify({ test: true, source: 'direct_test' })
+    ];
+
+    logger.info('🔍 Attempting GPS insert with values:', testValues);
+
+    const result = await pgPool.query(insertQuery, testValues);
+
+    logger.info('✅ GPS insert successful:', result.rows[0]);
+
+    return {
+      success: true,
+      inserted_id: result.rows[0].id,
+      data: result.rows[0]
+    };
+
+  } catch (error) {
+    logger.error('❌ Error in test GPS insert:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -1906,5 +2680,10 @@ module.exports = {
   getDatabaseStats,
   getTableData,
   getCleanGPSData,
-  createGPSCleanTable
+  createGPSCleanTable,
+  forceCreateTables,
+  processBoatsCSV,
+  extractHistoricalGPSData,
+  forceExtractGPSFromWebhooks,
+  testGPSInsert
 };
