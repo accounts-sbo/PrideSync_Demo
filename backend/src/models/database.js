@@ -267,6 +267,9 @@ async function createTables() {
 
     logger.info('✅ Database tables created/verified successfully');
     logger.info('📊 New structure: pride_boats, kpn_trackers, boat_tracker_mappings, webhook_logs');
+
+    // Ensure demo boats exist for voting
+    await ensureDemoBoats();
   } catch (error) {
     logger.error('❌ Error creating database tables:', error);
     throw error;
@@ -1202,14 +1205,26 @@ async function recordVote(voteData) {
     return vote;
   }
 
+  // First, try to get the pride_boat_id from parade_position (boat_number)
+  let prideBoatId = null;
+  try {
+    const boatQuery = `SELECT id FROM pride_boats WHERE parade_position = $1`;
+    const boatResult = await pgPool.query(boatQuery, [voteData.boat_number]);
+    if (boatResult.rows.length > 0) {
+      prideBoatId = boatResult.rows[0].id;
+    }
+  } catch (error) {
+    logger.warn(`Could not find pride_boat_id for parade_position ${voteData.boat_number}:`, error.message);
+  }
+
   const query = `
-    INSERT INTO votes (boat_id, boat_number, vote_type, user_session, ip_address, user_agent)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO votes (pride_boat_id, parade_position, vote_type, user_session, ip_address, user_agent, timestamp)
+    VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
     RETURNING *;
   `;
 
   const values = [
-    voteData.boat_id || null,
+    prideBoatId,
     voteData.boat_number,
     voteData.vote_type,
     voteData.user_session,
@@ -1219,10 +1234,10 @@ async function recordVote(voteData) {
 
   try {
     const result = await pgPool.query(query, values);
-    logger.debug(`Vote recorded: ${voteData.vote_type} for boat ${voteData.boat_number}`);
+    logger.info(`✅ Vote recorded in Railway DB: ${voteData.vote_type} for boat ${voteData.boat_number} (pride_boat_id: ${prideBoatId})`);
     return result.rows[0];
   } catch (error) {
-    logger.error('Error recording vote:', error);
+    logger.error('❌ Error recording vote in Railway DB:', error);
     throw error;
   }
 }
@@ -1260,21 +1275,22 @@ async function getVoteCounts() {
 
   const query = `
     SELECT
-      b.boat_number,
-      b.name,
-      b.organisation,
-      b.theme,
+      pb.parade_position as boat_number,
+      pb.boat_name as name,
+      pb.organisation,
+      pb.theme,
       COUNT(CASE WHEN v.vote_type = 'heart' THEN 1 END) as hearts,
       COUNT(CASE WHEN v.vote_type = 'star' THEN 1 END) as stars,
       COUNT(v.id) as total_votes
-    FROM boats b
-    LEFT JOIN votes v ON b.boat_number = v.boat_number
-    GROUP BY b.boat_number, b.name, b.organisation, b.theme
-    ORDER BY stars DESC, hearts DESC, b.boat_number ASC;
+    FROM pride_boats pb
+    LEFT JOIN votes v ON pb.parade_position = v.parade_position
+    GROUP BY pb.parade_position, pb.boat_name, pb.organisation, pb.theme
+    ORDER BY stars DESC, hearts DESC, pb.parade_position ASC;
   `;
 
   try {
     const result = await pgPool.query(query);
+    logger.debug(`✅ Retrieved vote counts for ${result.rows.length} boats from Railway DB`);
     return result.rows;
   } catch (error) {
     logger.error('Error fetching vote counts:', error);
@@ -1308,19 +1324,59 @@ async function getUserVotes(userSession) {
   }
 
   const query = `
-    SELECT boat_number, vote_type, COUNT(*) as count
+    SELECT parade_position as boat_number, vote_type, COUNT(*) as count
     FROM votes
     WHERE user_session = $1
-    GROUP BY boat_number, vote_type
-    ORDER BY boat_number ASC;
+    GROUP BY parade_position, vote_type
+    ORDER BY parade_position ASC;
   `;
 
   try {
     const result = await pgPool.query(query, [userSession]);
+    logger.debug(`✅ Retrieved user votes for session ${userSession}: ${result.rows.length} vote groups`);
     return result.rows;
   } catch (error) {
     logger.error('Error fetching user votes:', error);
     return [];
+  }
+}
+
+/**
+ * Ensure demo boats exist in pride_boats table
+ */
+async function ensureDemoBoats() {
+  if (!pgPool) return;
+
+  try {
+    // Check if we have any boats
+    const countResult = await pgPool.query('SELECT COUNT(*) FROM pride_boats');
+    const boatCount = parseInt(countResult.rows[0].count);
+
+    if (boatCount === 0) {
+      logger.info('🚢 No boats found, inserting demo boats...');
+
+      const demoBoats = [
+        { position: 1, name: 'Rainbow Warriors', organisation: 'Pride Amsterdam', theme: 'Music & Dance' },
+        { position: 2, name: 'Love Boat', organisation: 'COC Nederland', theme: 'Love & Unity' },
+        { position: 3, name: 'Freedom Float', organisation: 'EuroPride', theme: 'Freedom' },
+        { position: 4, name: 'Unity Express', organisation: 'LGBTI+ Alliance', theme: 'Unity' },
+        { position: 5, name: 'Pride Power', organisation: 'Amsterdam Pride', theme: 'Power' }
+      ];
+
+      for (const boat of demoBoats) {
+        await pgPool.query(`
+          INSERT INTO pride_boats (parade_position, boat_name, organisation, theme)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (parade_position) DO NOTHING
+        `, [boat.position, boat.name, boat.organisation, boat.theme]);
+      }
+
+      logger.info(`✅ Inserted ${demoBoats.length} demo boats into pride_boats table`);
+    } else {
+      logger.debug(`✅ Found ${boatCount} boats in pride_boats table`);
+    }
+  } catch (error) {
+    logger.error('❌ Error ensuring demo boats:', error);
   }
 }
 
@@ -2712,6 +2768,7 @@ module.exports = {
   recordVote,
   getVoteCounts,
   getUserVotes,
+  ensureDemoBoats,
   // Webhook logging
   logWebhookRequest,
   getWebhookLogs,
