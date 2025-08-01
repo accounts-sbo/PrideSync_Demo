@@ -15,6 +15,12 @@ interface Boat {
   distance?: string;
   lat?: number;
   lon?: number;
+  // Additional pride boat properties
+  description?: string;
+  captain_name?: string;
+  boat_type?: string;
+  status?: string;
+  pride_boat_id?: number;
 }
 
 interface UserStats {
