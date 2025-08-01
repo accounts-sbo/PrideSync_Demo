@@ -155,4 +155,32 @@ router.post('/init-tables', async (req, res) => {
   }
 });
 
+/**
+ * Force Create Tables
+ * POST /api/database/force-create-tables
+ *
+ * Force create all database tables with direct SQL
+ */
+router.post('/force-create-tables', async (req, res) => {
+  try {
+    logger.info('🔧 Force creating database tables with direct SQL');
+
+    const result = await database.forceCreateTables();
+
+    res.json({
+      success: true,
+      message: 'Database tables force created successfully',
+      result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Error force creating database tables:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = router;

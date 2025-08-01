@@ -1798,6 +1798,198 @@ async function createGPSCleanTable() {
   }
 }
 
+async function forceCreateTables() {
+  logger.info('🔧 Force creating all database tables');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // First, check if we can connect to the database
+    const testQuery = 'SELECT NOW() as current_time';
+    const testResult = await pgPool.query(testQuery);
+    logger.info('✅ Database connection verified:', testResult.rows[0]);
+
+    // Create all tables with explicit SQL
+    const createTablesSQL = `
+      -- Pride Boats table
+      CREATE TABLE IF NOT EXISTS pride_boats (
+        id SERIAL PRIMARY KEY,
+        parade_position INTEGER UNIQUE NOT NULL,
+        boat_name VARCHAR(255) NOT NULL,
+        organisation VARCHAR(255),
+        theme TEXT,
+        description TEXT,
+        captain_name VARCHAR(255),
+        captain_phone VARCHAR(20),
+        captain_email VARCHAR(255),
+        boat_type VARCHAR(100),
+        length_meters DECIMAL(5,2),
+        width_meters DECIMAL(5,2),
+        max_persons INTEGER,
+        status VARCHAR(50) DEFAULT 'registered',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- KPN Trackers table
+      CREATE TABLE IF NOT EXISTS kpn_trackers (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50) UNIQUE NOT NULL,
+        asset_code VARCHAR(20) NOT NULL,
+        asset_type VARCHAR(50) DEFAULT 'Boat',
+        device_type VARCHAR(100),
+        serial_number VARCHAR(50),
+        imei VARCHAR(20),
+        enabled BOOLEAN DEFAULT true,
+        last_connected TIMESTAMP,
+        last_trip TIMESTAMP,
+        current_status VARCHAR(100),
+        odometer_km DECIMAL(10,2),
+        run_hours DECIMAL(10,2),
+        project VARCHAR(50),
+        department VARCHAR(50),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Boat-Tracker Mappings
+      CREATE TABLE IF NOT EXISTS boat_tracker_mappings (
+        id SERIAL PRIMARY KEY,
+        pride_boat_id INTEGER,
+        kpn_tracker_id INTEGER,
+        parade_position INTEGER,
+        tracker_name VARCHAR(50),
+        asset_code VARCHAR(20),
+        is_active BOOLEAN DEFAULT true,
+        mapped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        mapped_by VARCHAR(100),
+        notes TEXT,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE CASCADE,
+        FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE,
+        UNIQUE(pride_boat_id, is_active)
+      );
+
+      -- Votes table
+      CREATE TABLE IF NOT EXISTS votes (
+        id SERIAL PRIMARY KEY,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        vote_type VARCHAR(10) CHECK(vote_type IN ('heart', 'star')),
+        user_session VARCHAR(255),
+        ip_address INET,
+        user_agent TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE CASCADE,
+        FOREIGN KEY (parade_position) REFERENCES pride_boats(parade_position) ON DELETE CASCADE
+      );
+
+      -- GPS Positions table
+      CREATE TABLE IF NOT EXISTS gps_positions (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50) NOT NULL,
+        kpn_tracker_id INTEGER,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        latitude DECIMAL(10, 8) NOT NULL,
+        longitude DECIMAL(11, 8) NOT NULL,
+        route_distance INTEGER DEFAULT 0,
+        route_progress DECIMAL(5, 2) DEFAULT 0,
+        speed DECIMAL(5, 2) DEFAULT 0,
+        heading INTEGER DEFAULT 0,
+        distance_from_route DECIMAL(6, 2) DEFAULT 0,
+        altitude DECIMAL(8, 2),
+        accuracy DECIMAL(6, 2),
+        timestamp TIMESTAMP NOT NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        raw_data JSONB,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
+      );
+
+      -- Incidents table
+      CREATE TABLE IF NOT EXISTS incidents (
+        id SERIAL PRIMARY KEY,
+        tracker_name VARCHAR(50),
+        kpn_tracker_id INTEGER,
+        pride_boat_id INTEGER,
+        parade_position INTEGER,
+        incident_type VARCHAR(100) NOT NULL,
+        severity VARCHAR(20) DEFAULT 'info',
+        message TEXT,
+        metadata JSONB,
+        timestamp TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
+        FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
+      );
+
+      -- Webhook logs table (CRITICAL for KPN monitoring)
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id SERIAL PRIMARY KEY,
+        endpoint VARCHAR(100) NOT NULL,
+        method VARCHAR(10) NOT NULL,
+        headers JSONB,
+        body JSONB,
+        query_params JSONB,
+        ip_address INET,
+        user_agent TEXT,
+        response_status INTEGER,
+        response_body JSONB,
+        processing_time_ms INTEGER,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    // Execute the table creation
+    await pgPool.query(createTablesSQL);
+    logger.info('✅ All tables created successfully');
+
+    // Create indexes
+    const createIndexesSQL = `
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_name ON gps_positions(tracker_name);
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp ON gps_positions(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_gps_positions_pride_boat ON gps_positions(pride_boat_id);
+      CREATE INDEX IF NOT EXISTS idx_boat_tracker_mappings_active ON boat_tracker_mappings(is_active);
+      CREATE INDEX IF NOT EXISTS idx_kpn_trackers_asset_code ON kpn_trackers(asset_code);
+      CREATE INDEX IF NOT EXISTS idx_pride_boats_position ON pride_boats(parade_position);
+      CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint);
+      CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at);
+    `;
+
+    await pgPool.query(createIndexesSQL);
+    logger.info('✅ All indexes created successfully');
+
+    // Verify tables were created
+    const verifyQuery = `
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `;
+    const verifyResult = await pgPool.query(verifyQuery);
+    const tableNames = verifyResult.rows.map(row => row.table_name);
+
+    logger.info('✅ Database tables verified:', tableNames);
+
+    return {
+      success: true,
+      tables_created: tableNames,
+      total_tables: tableNames.length,
+      message: 'All database tables force created successfully'
+    };
+
+  } catch (error) {
+    logger.error('❌ Error force creating database tables:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -1852,5 +2044,6 @@ module.exports = {
   getDatabaseStats,
   getTableData,
   getCleanGPSData,
-  createGPSCleanTable
+  createGPSCleanTable,
+  forceCreateTables
 };
