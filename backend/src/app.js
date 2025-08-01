@@ -13,6 +13,7 @@ const cmsRoutes = require('./routes/cms');
 const deviceManagementRoutes = require('./routes/device-management');
 const votingRoutes = require('./routes/voting');
 const databaseRoutes = require('./routes/database');
+const locationRoutes = require('./routes/locations');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -105,6 +106,7 @@ app.use('/api/cms', cmsRoutes);
 app.use('/api/device-management', deviceManagementRoutes);
 app.use('/api/voting', votingRoutes);
 app.use('/api/database', databaseRoutes);
+app.use('/api/locations', locationRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
