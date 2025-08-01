@@ -15,6 +15,12 @@ interface Boat {
   distance?: string;
   lat?: number;
   lon?: number;
+  // Additional pride boat properties
+  description?: string;
+  captain_name?: string;
+  boat_type?: string;
+  status?: string;
+  pride_boat_id?: number;
 }
 
 interface UserStats {
@@ -586,16 +592,22 @@ export default function PrideBoatBallot() {
       const result = await api.voting.getBoats();
 
       if (result.success && result.data.length > 0) {
-        setBoats(result.data);
-        setCurrentBoat(result.data[0]); // Start met eerste boot
+        // Normalize boat data to ensure hearts and stars are always numbers (set to 0)
+        const normalizedBoats = result.data.map((boat: any) => ({
+          ...boat,
+          hearts: 0, // Reset to 0 for clean state
+          stars: 0   // Reset to 0 for clean state
+        }));
+        setBoats(normalizedBoats);
+        setCurrentBoat(normalizedBoats[0]); // Start met eerste boot
       } else {
         // Fallback to mock data if API fails
         const mockBoats: Boat[] = [
-          { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
-          { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
-          { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 },
-          { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 84, stars: 67 },
-          { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 112, stars: 78 }
+          { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 0, stars: 0 },
+          { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 0, stars: 0 },
+          { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 0, stars: 0 },
+          { id: 4, name: "Unity Float", theme: "Together Strong", position: 4, hearts: 0, stars: 0 },
+          { id: 5, name: "Love Boat Amsterdam", theme: "Acceptance", position: 5, hearts: 0, stars: 0 }
         ];
         setBoats(mockBoats);
         setCurrentBoat(mockBoats[0]);
@@ -604,9 +616,9 @@ export default function PrideBoatBallot() {
       console.error('Error loading boats:', error);
       // Use mock data as fallback
       const mockBoats: Boat[] = [
-        { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 127, stars: 89 },
-        { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 98, stars: 76 },
-        { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 156, stars: 92 }
+        { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 0, stars: 0 },
+        { id: 2, name: "Pride & Joy", theme: "Love & Unity", position: 2, hearts: 0, stars: 0 },
+        { id: 3, name: "Spectrum Sailors", theme: "Diversity", position: 3, hearts: 0, stars: 0 }
       ];
       setBoats(mockBoats);
       setCurrentBoat(mockBoats[0]);
@@ -636,7 +648,7 @@ export default function PrideBoatBallot() {
         boat.id === boatId
           ? {
               ...boat,
-              [voteType === 'heart' ? 'hearts' : 'stars']: boat[voteType === 'heart' ? 'hearts' : 'stars'] + 1
+              [voteType === 'heart' ? 'hearts' : 'stars']: (boat[voteType === 'heart' ? 'hearts' : 'stars'] || 0) + 1
             }
           : boat
       ));
@@ -741,23 +753,11 @@ export default function PrideBoatBallot() {
 
   // Star swipe detection functions
   const handleStarTouchStart = (e: React.TouchEvent) => {
-    console.log('Star touch start detected');
+    console.log('⭐ Star touch start detected');
 
-    // Check conditions
+    // Additional check for GPS overlay (main conditions are checked in JSX)
     if (showGpsOverlay) {
-      console.log('Star touch blocked - GPS overlay is shown');
-      return;
-    }
-    if (isStarCooldown) {
-      console.log('Star touch blocked by cooldown');
-      return;
-    }
-    if (!currentBoat) {
-      console.log('Star touch blocked - no current boat');
-      return;
-    }
-    if ((userVotes[currentBoat.id] || 0) >= 5) {
-      console.log('Star touch blocked - 5 star limit reached');
+      console.log('⭐ Star touch blocked - GPS overlay is shown');
       return;
     }
 
@@ -767,10 +767,17 @@ export default function PrideBoatBallot() {
       y: touch.clientY,
       time: Date.now()
     });
+    console.log('⭐ Star touch start registered:', { x: touch.clientX, y: touch.clientY });
   };
 
   const handleStarTouchEnd = (e: React.TouchEvent) => {
-    if (!starTouchStart || showGpsOverlay) return; // Disable swipe when GPS overlay is shown
+    console.log('⭐ Star touch end detected');
+
+    if (!starTouchStart || showGpsOverlay) {
+      console.log('⭐ Star touch end blocked:', { starTouchStart: !!starTouchStart, showGpsOverlay });
+      setStarTouchStart(null);
+      return;
+    }
 
     const touch = e.changedTouches[0];
     const deltaX = touch.clientX - starTouchStart.x;
@@ -780,14 +787,24 @@ export default function PrideBoatBallot() {
     // Check if it's a swipe up (negative deltaY means up)
     const isSwipeUp = deltaY < -50 && Math.abs(deltaX) < 100 && deltaTime < 500;
 
-    console.log('Star touch end:', { deltaX, deltaY, deltaTime, isSwipeUp });
+    console.log('⭐ Star touch end analysis:', {
+      deltaX,
+      deltaY,
+      deltaTime,
+      isSwipeUp,
+      swipeUpCondition: deltaY < -50,
+      horizontalCondition: Math.abs(deltaX) < 100,
+      timeCondition: deltaTime < 500
+    });
 
     if (isSwipeUp) {
       e.preventDefault();
+      console.log('⭐ Star swipe up detected! Sending star vote...');
 
-      // First try to send the star vote (fixed)
+      // First try to send the star vote
       sendStar()
         .then(() => {
+          console.log('Star vote successful, triggering animation');
           // Only trigger animation if vote was successful
           triggerStarAnimation(touch.clientX, touch.clientY);
         })
@@ -797,6 +814,8 @@ export default function PrideBoatBallot() {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
         });
+    } else {
+      console.log('Star swipe not detected - conditions not met');
     }
 
     setStarTouchStart(null);
@@ -944,7 +963,7 @@ export default function PrideBoatBallot() {
       // Update local state optimistically with pulse animation
       setBoats(boats.map(boat =>
         boat.id === currentBoat.id
-          ? { ...boat, hearts: boat.hearts + 1 }
+          ? { ...boat, hearts: (boat.hearts || 0) + 1 }
           : boat
       ));
 
@@ -1010,7 +1029,7 @@ export default function PrideBoatBallot() {
       // Update local state optimistically
       setBoats(boats.map(boat =>
         boat.id === currentBoat.id
-          ? { ...boat, stars: boat.stars + 1 }
+          ? { ...boat, stars: (boat.stars || 0) + 1 }
           : boat
       ));
 
@@ -1079,7 +1098,7 @@ export default function PrideBoatBallot() {
     setCurrentBoat(boats[nextIndex]);
   };
 
-  const sortedBoats = [...boats].sort((a, b) => b.stars - a.stars);
+  const sortedBoats = [...boats].sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
   // Idea form component
   const IdeaForm = ({ onSubmit }: { onSubmit: (idea: string, email: string) => void }) => {
@@ -1369,6 +1388,16 @@ export default function PrideBoatBallot() {
           className={`stars-section flex-1 bg-gradient-to-br from-yellow-400 to-orange-500 flex flex-col items-center justify-center text-white cursor-pointer active:scale-95 transition-all duration-300 relative overflow-hidden ${
             isStarCooldown || (currentBoat && (userVotes[currentBoat.id] || 0) >= 5) ? 'opacity-60 cursor-not-allowed' : ''
           }`}
+          onMouseEnter={() => {
+            const touchEnabled = !isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5;
+            console.log('⭐ Star section hover - Touch enabled:', touchEnabled, {
+              isStarCooldown,
+              currentBoat: !!currentBoat,
+              currentBoatId: currentBoat?.id,
+              userVotes: currentBoat ? userVotes[currentBoat.id] || 0 : 'no boat',
+              condition: (userVotes[currentBoat?.id || 0] || 0) < 5
+            });
+          }}
           onClick={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
             // For desktop/click, trigger animation at center of element
             const rect = e.currentTarget.getBoundingClientRect();
@@ -1388,8 +1417,14 @@ export default function PrideBoatBallot() {
                 alert(`Er ging iets mis bij het stemmen. Probeer het opnieuw.\n\nDetails: ${errorMessage}`);
               });
           } : undefined}
-          onTouchStart={handleStarTouchStart}
-          onTouchEnd={handleStarTouchEnd}
+          onTouchStart={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
+            console.log('⭐ Touch start wrapper called');
+            handleStarTouchStart(e);
+          } : undefined}
+          onTouchEnd={!isStarCooldown && currentBoat && (userVotes[currentBoat.id] || 0) < 5 ? (e) => {
+            console.log('⭐ Touch end wrapper called');
+            handleStarTouchEnd(e);
+          } : undefined}
         >
           <div className="text-6xl mb-4">⭐</div>
           <div className="text-lg font-semibold">
@@ -1452,11 +1487,11 @@ export default function PrideBoatBallot() {
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-1 heart-counter">
                 <span>💖</span>
-                <span className="font-semibold">{currentBoat.hearts}</span>
+                <span className="font-semibold">{currentBoat.hearts || 0}</span>
               </div>
               <div className="flex items-center space-x-1 star-counter">
                 <span>⭐</span>
-                <span className="font-semibold">{currentBoat.stars}</span>
+                <span className="font-semibold">{currentBoat.stars || 0}</span>
               </div>
             </div>
 
@@ -1580,12 +1615,20 @@ export default function PrideBoatBallot() {
                           {boat.organisation && (
                             <div className="text-xs text-gray-500 truncate">{boat.organisation}</div>
                           )}
+                          {boat.description && (
+                            <div className="text-xs text-gray-400 truncate mt-1" title={boat.description}>
+                              {boat.description.length > 40 ? `${boat.description.substring(0, 40)}...` : boat.description}
+                            </div>
+                          )}
+                          {boat.captain_name && (
+                            <div className="text-xs text-blue-500 truncate">👨‍✈️ {boat.captain_name}</div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
                         <div className="text-right mr-2">
-                          <div className="font-bold text-purple-600 text-sm">{boat.stars} ⭐</div>
-                          <div className="text-xs text-gray-500">{boat.hearts} 💖</div>
+                          <div className="font-bold text-purple-600 text-sm">{boat.stars || 0} ⭐</div>
+                          <div className="text-xs text-gray-500">{boat.hearts || 0} 💖</div>
                         </div>
                         {/* Voting buttons */}
                         <div className="flex flex-col space-y-1">
@@ -1777,7 +1820,8 @@ export default function PrideBoatBallot() {
                 alert('API connection successful!');
               } catch (error) {
                 console.error('❌ API test failed:', error);
-                alert('API connection failed: ' + error.message);
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                alert('API connection failed: ' + errorMessage);
               }
             }}
             className="block bg-blue-500 text-white px-4 py-2 rounded text-sm"

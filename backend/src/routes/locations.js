@@ -3,28 +3,39 @@ const router = express.Router();
 const logger = require('../services/logger');
 const { getLatestGPSPositions, getAllPrideBoats } = require('../models/database');
 
-// GPS service using real database data
+// GPS service using real database data with improved boat-tracker matching
 const gpsService = {
   async getAllBoats() {
     try {
       // Get latest GPS positions from database
       const gpsPositions = await getLatestGPSPositions();
       const prideBoats = await getAllPrideBoats();
+      const boatTrackerMappings = await getAllActiveBoatTrackerMappings();
 
       if (!gpsPositions || gpsPositions.length === 0) {
         logger.warn('No GPS positions found, using fallback data');
         return await this.getFallbackBoats();
       }
 
-      // Create a map of tracker_name to pride boat info
-      const prideBoatMap = new Map();
-      prideBoats.forEach(boat => {
-        // Try to match by parade_position or boat_name
-        prideBoatMap.set(boat.parade_position.toString(), boat);
-        prideBoatMap.set(boat.boat_name.toLowerCase(), boat);
+      // Create mapping from tracker_name to pride boat via boat_tracker_mappings
+      const trackerToPrideBoatMap = new Map();
+      boatTrackerMappings.forEach(mapping => {
+        if (mapping.tracker_name && mapping.is_active) {
+          trackerToPrideBoatMap.set(mapping.tracker_name, {
+            pride_boat_id: mapping.pride_boat_id,
+            parade_position: mapping.parade_position
+          });
+        }
       });
 
-      // Combine GPS positions with pride boat data
+      // Create a map of pride boat data by ID and parade position
+      const prideBoatMap = new Map();
+      prideBoats.forEach(boat => {
+        prideBoatMap.set(boat.id, boat);
+        prideBoatMap.set(boat.parade_position, boat);
+      });
+
+      // Combine GPS positions with pride boat data using proper mappings
       const boats = [];
       const processedTrackers = new Set();
 
@@ -32,23 +43,35 @@ const gpsService = {
         if (processedTrackers.has(pos.tracker_name)) return;
         processedTrackers.add(pos.tracker_name);
 
-        // Try to find matching pride boat
-        let prideBoat = prideBoatMap.get(pos.tracker_name) ||
-                       prideBoatMap.get(pos.tracker_name.toLowerCase()) ||
-                       prideBoatMap.get(pos.parade_position?.toString());
+        // Find matching pride boat using proper mapping
+        let prideBoat = null;
 
-        // If no direct match, try to find by similar name
+        // First try to find via boat-tracker mapping
+        const mapping = trackerToPrideBoatMap.get(pos.tracker_name);
+        if (mapping) {
+          prideBoat = prideBoatMap.get(mapping.pride_boat_id) || prideBoatMap.get(mapping.parade_position);
+        }
+
+        // Fallback: try direct parade_position match from GPS data
+        if (!prideBoat && pos.parade_position) {
+          prideBoat = prideBoatMap.get(pos.parade_position);
+        }
+
+        // Last resort: try name-based matching
         if (!prideBoat) {
           for (const [key, boat] of prideBoatMap) {
-            if (key.includes(pos.tracker_name.toLowerCase()) ||
-                pos.tracker_name.toLowerCase().includes(key)) {
+            if (typeof key === 'string' && (
+                key.toLowerCase().includes(pos.tracker_name.toLowerCase()) ||
+                pos.tracker_name.toLowerCase().includes(key.toLowerCase())
+            )) {
               prideBoat = boat;
               break;
             }
           }
         }
 
-        boats.push({
+        // Create boat object with complete pride boat information
+        const boat = {
           id: prideBoat?.parade_position || pos.parade_position || boats.length + 1,
           name: prideBoat?.boat_name || pos.tracker_name,
           lat: parseFloat(pos.latitude),
@@ -59,8 +82,15 @@ const gpsService = {
           position: prideBoat?.parade_position || boats.length + 1,
           tracker_name: pos.tracker_name,
           timestamp: pos.timestamp,
-          accuracy: pos.accuracy
-        });
+          accuracy: pos.accuracy,
+          // Additional pride boat data for voting app
+          captain_name: prideBoat?.captain_name || null,
+          boat_type: prideBoat?.boat_type || null,
+          status: prideBoat?.status || 'active',
+          pride_boat_id: prideBoat?.id || null
+        };
+
+        boats.push(boat);
       });
 
       logger.info(`✅ Retrieved ${boats.length} boats with GPS positions from database`);
@@ -205,16 +235,54 @@ router.get('/nearest', async (req, res) => {
 router.get('/all', async (req, res) => {
   try {
     const boats = await gpsService.getAllBoats();
-    
+
     res.json({
       success: true,
       data: boats
     });
   } catch (error) {
     logger.error('Error fetching boat locations:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: 'Internal server error' 
+      error: 'Internal server error'
+    });
+  }
+});
+
+// GET /api/locations/pride-boats - Get all pride boats data for leaderboard
+router.get('/pride-boats', async (req, res) => {
+  try {
+    const prideBoats = await getAllPrideBoats();
+
+    // Transform data for frontend use
+    const boats = prideBoats.map(boat => ({
+      id: boat.id,
+      parade_position: boat.parade_position,
+      name: boat.boat_name,
+      organisation: boat.organisation,
+      theme: boat.theme,
+      description: boat.description,
+      captain_name: boat.captain_name,
+      boat_type: boat.boat_type,
+      status: boat.status,
+      created_at: boat.created_at,
+      updated_at: boat.updated_at
+    }));
+
+    logger.info(`✅ Retrieved ${boats.length} pride boats for leaderboard`);
+
+    res.json({
+      success: true,
+      data: boats,
+      count: boats.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('Error fetching pride boats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch pride boats data'
     });
   }
 });

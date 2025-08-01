@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { recordVote, getVoteCounts, getUserVotes, getAllBoats } = require('../models/database');
+const { recordVote, getVoteCounts, getUserVotes, getAllBoats, getAllPrideBoats } = require('../models/database');
 const logger = require('../services/logger');
 
 /**
@@ -9,17 +9,33 @@ const logger = require('../services/logger');
 router.get('/boats', async (req, res) => {
   try {
     const voteCounts = await getVoteCounts();
-    
-    // Transform data for the frontend
-    const boats = voteCounts.map((boat, index) => ({
-      id: boat.boat_number,
-      name: boat.name,
-      theme: boat.theme || boat.organisation,
-      position: index + 1,
-      hearts: parseInt(boat.hearts) || 0,
-      stars: parseInt(boat.stars) || 0,
-      organisation: boat.organisation
-    }));
+    const prideBoats = await getAllPrideBoats();
+
+    // Create a map of pride boats by parade_position for easy lookup
+    const prideBoatMap = new Map();
+    prideBoats.forEach(boat => {
+      prideBoatMap.set(boat.parade_position, boat);
+    });
+
+    // Transform data for the frontend with enhanced pride boat information
+    const boats = voteCounts.map((boat, index) => {
+      const prideBoat = prideBoatMap.get(boat.boat_number);
+
+      return {
+        id: boat.boat_number,
+        name: boat.name,
+        theme: boat.theme || prideBoat?.theme || boat.organisation,
+        position: index + 1,
+        hearts: parseInt(boat.hearts) || 0,
+        stars: parseInt(boat.stars) || 0,
+        organisation: boat.organisation || prideBoat?.organisation,
+        description: prideBoat?.description || '',
+        captain_name: prideBoat?.captain_name || null,
+        boat_type: prideBoat?.boat_type || null,
+        status: prideBoat?.status || 'active',
+        pride_boat_id: prideBoat?.id || null
+      };
+    });
 
     res.json({
       success: true,
@@ -157,7 +173,14 @@ router.get('/leaderboard', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const voteCounts = await getVoteCounts();
-    
+    const prideBoats = await getAllPrideBoats();
+
+    // Create a map of pride boats by parade_position for easy lookup
+    const prideBoatMap = new Map();
+    prideBoats.forEach(boat => {
+      prideBoatMap.set(boat.parade_position, boat);
+    });
+
     // Sort by stars descending, then by hearts descending
     const leaderboard = voteCounts
       .sort((a, b) => {
@@ -166,16 +189,24 @@ router.get('/leaderboard', async (req, res) => {
         return parseInt(b.hearts) - parseInt(a.hearts);
       })
       .slice(0, limit)
-      .map((boat, index) => ({
-        rank: index + 1,
-        boat_number: boat.boat_number,
-        name: boat.name,
-        organisation: boat.organisation,
-        theme: boat.theme,
-        stars: parseInt(boat.stars) || 0,
-        hearts: parseInt(boat.hearts) || 0,
-        total_votes: parseInt(boat.total_votes) || 0
-      }));
+      .map((boat, index) => {
+        const prideBoat = prideBoatMap.get(boat.boat_number);
+
+        return {
+          rank: index + 1,
+          boat_number: boat.boat_number,
+          name: boat.name,
+          organisation: boat.organisation || prideBoat?.organisation,
+          theme: boat.theme || prideBoat?.theme,
+          description: prideBoat?.description || '',
+          captain_name: prideBoat?.captain_name || null,
+          boat_type: prideBoat?.boat_type || null,
+          stars: parseInt(boat.stars) || 0,
+          hearts: parseInt(boat.hearts) || 0,
+          total_votes: parseInt(boat.total_votes) || 0,
+          pride_boat_id: prideBoat?.id || null
+        };
+      });
 
     res.json({
       success: true,
