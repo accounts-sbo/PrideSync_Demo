@@ -2399,6 +2399,134 @@ async function extractHistoricalGPSData() {
   }
 }
 
+async function forceExtractGPSFromWebhooks() {
+  logger.info('🚀 Force GPS extraction from webhook logs');
+
+  if (!pgPool) {
+    throw new Error('Database not available - no PostgreSQL connection');
+  }
+
+  try {
+    // Get webhook logs directly
+    const webhookQuery = `
+      SELECT id, endpoint, body, created_at
+      FROM webhook_logs
+      WHERE endpoint LIKE '%gps%'
+      AND body IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 50
+    `;
+
+    const webhookResult = await pgPool.query(webhookQuery);
+    const webhooks = webhookResult.rows;
+
+    logger.info(`📊 Found ${webhooks.length} webhook logs to process`);
+
+    let extracted = 0;
+    const devices = new Set();
+
+    for (const webhook of webhooks) {
+      try {
+        const payload = webhook.body;
+        const serNo = payload.SerNo;
+        const imei = payload.IMEI;
+
+        if (!serNo) continue;
+        devices.add(serNo);
+
+        logger.info(`🔍 Processing webhook ${webhook.id} for SerNo ${serNo}`);
+
+        // Extract GPS from Records.Fields
+        if (payload.Records && Array.isArray(payload.Records)) {
+          for (const record of payload.Records) {
+            if (record.Fields && Array.isArray(record.Fields)) {
+              for (const field of record.Fields) {
+                if (field.Lat !== undefined && (field.Long !== undefined || field.Lng !== undefined)) {
+
+                  logger.info(`📍 Found GPS data: Lat ${field.Lat}, Long ${field.Long || field.Lng}, PosAcc ${field.PosAcc}`);
+
+                  // Check if already exists
+                  const existsQuery = `
+                    SELECT id FROM gps_positions
+                    WHERE tracker_name = $1
+                    AND latitude = $2
+                    AND longitude = $3
+                    AND timestamp = $4
+                  `;
+
+                  const gpsTimestamp = field.GpsUTC || record.DateUTC || webhook.created_at;
+                  const existsResult = await pgPool.query(existsQuery, [
+                    serNo.toString(),
+                    parseFloat(field.Lat),
+                    parseFloat(field.Long || field.Lng),
+                    new Date(gpsTimestamp)
+                  ]);
+
+                  if (existsResult.rows.length > 0) {
+                    logger.info(`⚠️ GPS position already exists, skipping`);
+                    continue; // Skip duplicate
+                  }
+
+                  // Insert GPS position
+                  const insertQuery = `
+                    INSERT INTO gps_positions (
+                      tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+                      latitude, longitude, altitude, accuracy, speed, heading,
+                      timestamp, raw_data
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    RETURNING id
+                  `;
+
+                  const insertValues = [
+                    serNo.toString(),
+                    serNo,
+                    null,
+                    null,
+                    parseFloat(field.Lat),
+                    parseFloat(field.Long || field.Lng),
+                    field.Alt ? parseFloat(field.Alt) : null,
+                    field.PosAcc ? parseFloat(field.PosAcc) : null,
+                    field.Spd ? parseFloat(field.Spd) : null,
+                    field.Head ? parseFloat(field.Head) : null,
+                    new Date(gpsTimestamp),
+                    JSON.stringify({
+                      SerNo: serNo,
+                      IMEI: imei,
+                      extractedFrom: 'force_extraction',
+                      webhookId: webhook.id,
+                      originalField: field
+                    })
+                  ];
+
+                  const insertResult = await pgPool.query(insertQuery, insertValues);
+                  extracted++;
+
+                  logger.info(`✅ GPS extracted and saved with ID ${insertResult.rows[0].id}: SerNo ${serNo}, Lat ${field.Lat}, Long ${field.Long || field.Lng}, PosAcc ${field.PosAcc}`);
+                }
+              }
+            }
+          }
+        }
+      } catch (recordError) {
+        logger.error(`❌ Error processing webhook ${webhook.id}:`, recordError);
+      }
+    }
+
+    const result = {
+      webhooks_processed: webhooks.length,
+      gps_positions_extracted: extracted,
+      devices_found: devices.size
+    };
+
+    logger.info('✅ Force GPS extraction completed:', result);
+    return result;
+
+  } catch (error) {
+    logger.error('❌ Error in force GPS extraction:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   testConnection,
@@ -2456,5 +2584,6 @@ module.exports = {
   createGPSCleanTable,
   forceCreateTables,
   processBoatsCSV,
-  extractHistoricalGPSData
+  extractHistoricalGPSData,
+  forceExtractGPSFromWebhooks
 };
