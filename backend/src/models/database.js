@@ -2577,21 +2577,17 @@ async function forceExtractGPSFromWebhooks() {
                     continue; // Skip duplicate
                   }
 
-                  // Insert GPS position
+                  // Insert GPS position (without foreign key constraint)
                   const insertQuery = `
                     INSERT INTO gps_positions (
-                      tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
-                      latitude, longitude, altitude, accuracy, speed, heading,
+                      tracker_name, latitude, longitude, altitude, accuracy, speed, heading,
                       timestamp, raw_data
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     RETURNING id
                   `;
 
                   const insertValues = [
                     serNo.toString(),
-                    serNo,
-                    null,
-                    null,
                     parseFloat(field.Lat),
                     parseFloat(field.Long || field.Lng),
                     field.Alt ? parseFloat(field.Alt) : null,
@@ -2645,18 +2641,17 @@ async function testGPSInsert() {
   }
 
   try {
-    // Test simple insert
+    // Test insert without foreign key constraint (set kpn_tracker_id to null)
     const insertQuery = `
       INSERT INTO gps_positions (
-        tracker_name, kpn_tracker_id, latitude, longitude,
+        tracker_name, latitude, longitude,
         accuracy, timestamp, raw_data
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, tracker_name, latitude, longitude
     `;
 
     const testValues = [
       'TEST_1424493',
-      1424493,
       52.3676,
       4.9041,
       25,
