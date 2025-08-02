@@ -1,0 +1,12 @@
+backend/
+node_modules/
+server/
+webapp/
+pridesync-website/
+frontend-standalone/
+data/
+docs/
+*.md
+.git/
+.env*
+!frontend/
