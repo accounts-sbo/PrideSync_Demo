@@ -591,9 +591,9 @@ export default function PrideBoatBallot() {
     try {
       // DUMMY IMPLEMENTATION - Skip API call and use mock data directly
       console.log('🎭 Using dummy boat data (no API call)');
-      const result = { success: false }; // Force fallback to mock data
 
-      if (result.success && result.data.length > 0) {
+      // Force fallback to mock data by skipping the success check
+      if (false) {
         // Normalize boat data to ensure hearts and stars are always numbers (set to 0)
         const normalizedBoats = result.data.map((boat: any) => ({
           ...boat,
