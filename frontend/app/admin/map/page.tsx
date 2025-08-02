@@ -96,7 +96,7 @@ export default function LiveMapPage() {
               🗺️ Live GPS Tracking
             </h1>
             <p className="text-gray-400">
-              Real-time GPS positions van alle Pride boten en trackers
+              Real-time GPS positions van alle Pride boten en trackers (Debug Mode)
             </p>
           </div>
           

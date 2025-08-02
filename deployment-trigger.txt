@@ -1,3 +1,5 @@
-Deployment triggered at: 2025-08-01T19:22:47.885Z
-Retry deployment - fix deployment errors
-All fixes ready: star swipe, undefined values, GPS integration
+Deployment triggered at: 2025-08-01T21:55:30.000Z
+FORCE VERCEL DEPLOYMENT - Admin Map Page Fix
+Fixed admin map page API connection and added debug logging
+Debug: Added console.log statements to troubleshoot GPS data loading
+Changes: Use Next.js API proxy instead of direct backend calls
