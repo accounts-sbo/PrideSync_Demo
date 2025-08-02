@@ -589,7 +589,9 @@ export default function PrideBoatBallot() {
 
   const loadBoats = async () => {
     try {
-      const result = await api.voting.getBoats();
+      // DUMMY IMPLEMENTATION - Skip API call and use mock data directly
+      console.log('🎭 Using dummy boat data (no API call)');
+      const result = { success: false }; // Force fallback to mock data
 
       if (result.success && result.data.length > 0) {
         // Normalize boat data to ensure hearts and stars are always numbers (set to 0)
@@ -640,10 +642,11 @@ export default function PrideBoatBallot() {
     setVotingInProgress(true);
 
     try {
-      const userSession = getUserSession();
-      await api.voting.vote(boatId, voteType, userSession);
+      // DUMMY IMPLEMENTATION - No database calls
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Update boats state
+      // Update boats state locally
       setBoats(prev => prev.map(boat =>
         boat.id === boatId
           ? {
@@ -675,6 +678,8 @@ export default function PrideBoatBallot() {
       // Check for achievements
       checkAchievements(newStats);
 
+      console.log(`✅ Dummy vote: ${voteType} for boat ${boatId}`);
+
     } catch (error) {
       console.error('Error voting:', error);
     } finally {
@@ -684,23 +689,17 @@ export default function PrideBoatBallot() {
 
   const loadUserStats = async () => {
     try {
-      const userSession = getUserSession();
-      const result = await api.voting.getUserVotes(userSession);
+      // DUMMY IMPLEMENTATION - Use default stats
+      console.log('🎭 Using dummy user stats (no API call)');
 
-      if (result.success) {
-        setUserStats({
-          totalVotes: result.data.stars_given,
-          boatsVoted: result.data.boats_voted,
-          heartsGiven: result.data.hearts_given
-        });
+      setUserStats({
+        totalVotes: 0,
+        boatsVoted: 0,
+        heartsGiven: 0
+      });
 
-        // Set user votes for star limits
-        const votes: {[key: number]: number} = {};
-        Object.entries(result.data.votes_by_boat).forEach(([boatId, boatVotes]: [string, any]) => {
-          votes[parseInt(boatId)] = boatVotes.stars || 0;
-        });
-        setUserVotes(votes);
-      }
+      // Initialize empty user votes
+      setUserVotes({});
     } catch (error) {
       console.error('Error loading user stats:', error);
     }
@@ -957,8 +956,9 @@ export default function PrideBoatBallot() {
     if (!currentBoat) return;
 
     try {
-      const userSession = getUserSession();
-      await api.voting.vote(currentBoat.id, 'heart', userSession);
+      // DUMMY IMPLEMENTATION - No API call
+      console.log('🎭 Dummy heart sent to boat:', currentBoat.id);
+      await new Promise(resolve => setTimeout(resolve, 100)); // Simulate delay
 
       // Update local state optimistically with pulse animation
       setBoats(boats.map(boat =>
@@ -1018,13 +1018,12 @@ export default function PrideBoatBallot() {
         currentVotes: currentVotes
       });
 
-      const result = await api.voting.vote(currentBoat.id, 'star', userSession);
-      console.log('✅ Star vote result:', result);
+      // DUMMY IMPLEMENTATION - No API call
+      console.log('🎭 Dummy star sent to boat:', currentBoat.id);
+      await new Promise(resolve => setTimeout(resolve, 200)); // Simulate delay
 
-      // Check if the API call was successful
-      if (!result || !result.success) {
-        throw new Error(`API returned unsuccessful response: ${JSON.stringify(result)}`);
-      }
+      const result = { success: true }; // Dummy success response
+      console.log('✅ Dummy star vote result:', result);
 
       // Update local state optimistically
       setBoats(boats.map(boat =>
@@ -1775,8 +1774,9 @@ export default function PrideBoatBallot() {
               {showModal === 'ideas' && (
                 <IdeaForm onSubmit={async (idea, email) => {
                   try {
-                    const userSession = getUserSession();
-                    await api.voting.submitIdea(idea, email, userSession);
+                    // DUMMY IMPLEMENTATION - No API call
+                    console.log('🎭 Dummy idea submitted:', { idea, email });
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
 
                     alert('Bedankt voor je idee! We nemen het mee in overweging voor WorldPride 2026.');
                     setShowModal(null);
