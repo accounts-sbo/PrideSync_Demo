@@ -590,7 +590,7 @@ export default function PrideBoatBallot() {
   const loadBoats = async () => {
     try {
       // DUMMY IMPLEMENTATION - Skip API call and use mock data directly
-      console.log('🎭 Using dummy boat data (no API call)');
+      console.log('🎭 Using dummy boat data (no API call) - DEPLOYMENT TEST v1.0');
 
       // Use mock data directly (no API call)
       {
