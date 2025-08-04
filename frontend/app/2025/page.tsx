@@ -592,17 +592,8 @@ export default function PrideBoatBallot() {
       // DUMMY IMPLEMENTATION - Skip API call and use mock data directly
       console.log('🎭 Using dummy boat data (no API call)');
 
-      // Force fallback to mock data by skipping the success check
-      if (false) {
-        // Normalize boat data to ensure hearts and stars are always numbers (set to 0)
-        const normalizedBoats = result.data.map((boat: any) => ({
-          ...boat,
-          hearts: 0, // Reset to 0 for clean state
-          stars: 0   // Reset to 0 for clean state
-        }));
-        setBoats(normalizedBoats);
-        setCurrentBoat(normalizedBoats[0]); // Start met eerste boot
-      } else {
+      // Use mock data directly (no API call)
+      {
         // Fallback to mock data if API fails
         const mockBoats: Boat[] = [
           { id: 1, name: "Rainbow Warriors", theme: "Music & Dance", position: 1, hearts: 0, stars: 0 },
@@ -625,6 +616,7 @@ export default function PrideBoatBallot() {
       setBoats(mockBoats);
       setCurrentBoat(mockBoats[0]);
     }
+    setLoading(false);
   };
 
   const getUserStarVotes = (boatId: number): number => {
