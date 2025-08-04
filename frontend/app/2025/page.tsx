@@ -616,7 +616,6 @@ export default function PrideBoatBallot() {
       setBoats(mockBoats);
       setCurrentBoat(mockBoats[0]);
     }
-    setLoading(false);
   };
 
   const getUserStarVotes = (boatId: number): number => {
