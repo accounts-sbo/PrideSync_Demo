@@ -1072,6 +1072,120 @@ router.get('/gps-positions', async (req, res) => {
 });
 
 /**
+ * Get GPS Positions at Specific Time (Timeline)
+ * GET /api/webhooks/gps-timeline/at-time
+ *
+ * Query parameters:
+ * - timestamp: ISO timestamp to get positions for
+ * - trackers: Optional comma-separated list of tracker names
+ * - limit: Optional limit (default 100)
+ */
+router.get('/gps-timeline/at-time', async (req, res) => {
+  try {
+    const { timestamp, trackers, limit = 100 } = req.query;
+
+    if (!timestamp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameter: timestamp'
+      });
+    }
+
+    const options = {
+      limit: parseInt(limit),
+      trackerNames: trackers ? trackers.split(',').map(t => t.trim()) : null
+    };
+
+    const positions = await database.getGPSPositionsAtTime(timestamp, options);
+
+    res.json({
+      success: true,
+      data: positions,
+      count: positions.length,
+      timestamp: timestamp,
+      requestedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching GPS positions at time:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch GPS positions at time',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get GPS Positions in Time Range (Timeline)
+ * GET /api/webhooks/gps-timeline/range
+ *
+ * Query parameters:
+ * - startTime: ISO timestamp for start of range
+ * - endTime: ISO timestamp for end of range
+ * - trackers: Optional comma-separated list of tracker names
+ * - limit: Optional limit (default 1000)
+ */
+router.get('/gps-timeline/range', async (req, res) => {
+  try {
+    const { startTime, endTime, trackers, limit = 1000 } = req.query;
+
+    if (!startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters: startTime and endTime'
+      });
+    }
+
+    const options = {
+      limit: parseInt(limit),
+      trackerNames: trackers ? trackers.split(',').map(t => t.trim()) : null
+    };
+
+    const positions = await database.getGPSPositionsInTimeRange(startTime, endTime, options);
+
+    res.json({
+      success: true,
+      data: positions,
+      count: positions.length,
+      timeRange: { startTime, endTime },
+      requestedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching GPS positions in time range:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch GPS positions in time range',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get Timeline Metadata
+ * GET /api/webhooks/gps-timeline/metadata
+ *
+ * Returns information about available time range and trackers
+ */
+router.get('/gps-timeline/metadata', async (req, res) => {
+  try {
+    const metadata = await database.getTimelineMetadata();
+
+    res.json({
+      success: true,
+      data: metadata,
+      requestedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching timeline metadata:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch timeline metadata',
+      message: error.message
+    });
+  }
+});
+
+/**
  * Test Webhook Logging
  * POST /api/webhooks/test-log
  *
@@ -1125,20 +1239,31 @@ router.post('/test-gps', async (req, res) => {
   try {
     logger.info('🧪 Testing GPS position save');
 
+    // Generate different tracker names for testing (some mapped, some unmapped)
+    const trackerNames = ['1424670', '1424679', '1424493', '1424487', '1424671', '1327047', '1424678'];
+    const randomTracker = trackerNames[Math.floor(Math.random() * trackerNames.length)];
+
+    // Generate slightly different coordinates for each tracker
+    const baseLatitude = 52.3676;
+    const baseLongitude = 4.9041;
+    const latOffset = (Math.random() - 0.5) * 0.01; // ±0.005 degrees
+    const lngOffset = (Math.random() - 0.5) * 0.01;
+
     const testGPSData = {
-      tracker_name: 'TEST_TRACKER',
-      kpn_tracker_id: 9999999,
-      pride_boat_id: null,
-      parade_position: null,
-      latitude: 52.3676,
-      longitude: 4.9041,
-      altitude: 10,
-      accuracy: null,
-      speed: 0,
-      heading: 90,
+      tracker_name: randomTracker,
+      kpn_tracker_id: null, // Let the function look this up
+      pride_boat_id: null,  // Let the function look this up
+      parade_position: null, // Let the function look this up
+      latitude: baseLatitude + latOffset,
+      longitude: baseLongitude + lngOffset,
+      altitude: 10 + Math.random() * 10,
+      accuracy: Math.random() * 10,
+      speed: Math.random() * 50,
+      heading: Math.floor(Math.random() * 360),
       timestamp: new Date(),
       raw_data: {
         test: true,
+        tracker: randomTracker,
         timestamp: new Date().toISOString()
       }
     };
@@ -1167,6 +1292,97 @@ router.post('/test-gps', async (req, res) => {
       error: 'Failed to save test GPS position',
       message: error.message,
       stack: error.stack
+    });
+  }
+});
+
+/**
+ * Create Demo Mappings
+ * POST /api/webhooks/create-demo-mappings
+ *
+ * Creates demo boat-tracker mappings for testing
+ */
+router.post('/create-demo-mappings', async (req, res) => {
+  try {
+    logger.info('🔧 Creating demo boat-tracker mappings...');
+
+    // Demo mappings data
+    const demoMappings = [
+      { tracker_name: '1424670', parade_position: 1, boat_name: 'Pride Unity' },
+      { tracker_name: '1424679', parade_position: 2, boat_name: 'Pride Harmony' },
+      { tracker_name: '1424493', parade_position: 3, boat_name: 'Pride Freedom' },
+      { tracker_name: '1424487', parade_position: 4, boat_name: 'Pride Equality' },
+      { tracker_name: '1424671', parade_position: 5, boat_name: 'Pride Power' }
+    ];
+
+    let mappingsCreated = 0;
+    const results = [];
+
+    for (const mapping of demoMappings) {
+      try {
+        // 1. Create/update Pride Boat
+        const prideBoat = await database.createPrideBoat({
+          parade_position: mapping.parade_position,
+          boat_name: mapping.boat_name,
+          organisation: 'Amsterdam Pride',
+          theme: 'Demo Theme',
+          description: `Demo boat for testing - ${mapping.boat_name}`,
+          status: 'registered'
+        });
+
+        // 2. Create/update KPN Tracker
+        const kpnTracker = await database.createKPNTracker({
+          tracker_name: mapping.tracker_name,
+          asset_code: `P${mapping.parade_position}`,
+          asset_type: 'Boat',
+          description: `Demo tracker for ${mapping.boat_name}`,
+          enabled: true
+        });
+
+        // 3. Create Boat-Tracker Mapping
+        const boatTrackerMapping = await database.createBoatTrackerMapping({
+          pride_boat_id: prideBoat.id,
+          kpn_tracker_id: kpnTracker.id,
+          notes: `Demo mapping: ${mapping.boat_name} -> ${mapping.tracker_name}`,
+          is_active: true
+        });
+
+        mappingsCreated++;
+        results.push({
+          tracker_name: mapping.tracker_name,
+          parade_position: mapping.parade_position,
+          boat_name: mapping.boat_name,
+          pride_boat_id: prideBoat.id,
+          kpn_tracker_id: kpnTracker.id,
+          mapping_id: boatTrackerMapping.id
+        });
+
+        logger.info(`✅ Demo mapping created: ${mapping.boat_name} (${mapping.tracker_name}) -> Position ${mapping.parade_position}`);
+
+      } catch (mappingError) {
+        logger.error(`❌ Failed to create mapping for ${mapping.tracker_name}:`, mappingError);
+        results.push({
+          tracker_name: mapping.tracker_name,
+          error: mappingError.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Created ${mappingsCreated} demo boat-tracker mappings`,
+      mappingsCreated,
+      totalAttempted: demoMappings.length,
+      results,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Failed to create demo mappings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create demo mappings',
+      message: error.message
     });
   }
 });

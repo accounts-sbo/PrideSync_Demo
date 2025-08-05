@@ -12,6 +12,8 @@ let inMemoryPositions = [];
 let inMemoryVotes = [];
 let inMemoryDeviceMappings = [];
 let inMemoryWebhookLogs = [];
+let inMemoryKPNTrackers = [];
+let inMemoryBoatTrackerMappings = [];
 
 /**
  * Initialize database connections
@@ -207,6 +209,26 @@ async function createTables() {
     );
   `;
 
+  // Create indexes for timeline queries
+  const createGPSIndexes = `
+    -- Index for timeline queries (timestamp-based)
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp
+    ON gps_positions(timestamp DESC);
+
+    -- Index for tracker-based queries
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_timestamp
+    ON gps_positions(tracker_name, timestamp DESC);
+
+    -- Index for boat-based queries
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_boat_timestamp
+    ON gps_positions(pride_boat_id, timestamp DESC)
+    WHERE pride_boat_id IS NOT NULL;
+
+    -- Composite index for timeline queries with tracker filtering
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_timeline
+    ON gps_positions(timestamp DESC, tracker_name, latitude, longitude);
+  `;
+
   const createIncidentsTable = `
     CREATE TABLE IF NOT EXISTS incidents (
       id SERIAL PRIMARY KEY,
@@ -261,6 +283,7 @@ async function createTables() {
     await pgPool.query(createBoatTrackerMappingsTable);
     await pgPool.query(createVotesTable);
     await pgPool.query(createPositionsTable);
+    await pgPool.query(createGPSIndexes);
     await pgPool.query(createIncidentsTable);
     await pgPool.query(createWebhookLogsTable);
     await pgPool.query(createIndexes);
@@ -391,8 +414,103 @@ async function saveGPSPosition(gpsData) {
   });
 
   if (!pgPool) {
-    logger.warn('❌ No database connection, skipping GPS position save');
-    return;
+    // In-memory fallback - try to find mapping if not provided
+    let kpnTrackerId = gpsData.kpn_tracker_id;
+    let prideBoatId = gpsData.pride_boat_id;
+    let paradePosition = gpsData.parade_position;
+
+    if (!kpnTrackerId || !prideBoatId) {
+      // Look for mapping in in-memory mappings
+      const mapping = inMemoryBoatTrackerMappings.find(m =>
+        m.tracker_name === gpsData.tracker_name && m.is_active
+      );
+
+      if (mapping) {
+        kpnTrackerId = kpnTrackerId || mapping.kpn_tracker_id;
+        prideBoatId = prideBoatId || mapping.pride_boat_id;
+        paradePosition = paradePosition || mapping.parade_position;
+
+        logger.info(`🔗 Found in-memory mapping for tracker ${gpsData.tracker_name}:`, {
+          kpnTrackerId,
+          prideBoatId,
+          paradePosition
+        });
+      } else {
+        logger.debug(`⚠️ No in-memory mapping found for tracker ${gpsData.tracker_name}`);
+      }
+    }
+
+    const position = {
+      id: inMemoryPositions.length + 1,
+      tracker_name: gpsData.tracker_name,
+      kpn_tracker_id: kpnTrackerId,
+      pride_boat_id: prideBoatId,
+      parade_position: paradePosition,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      altitude: gpsData.altitude,
+      accuracy: gpsData.accuracy,
+      speed: gpsData.speed,
+      heading: gpsData.heading,
+      timestamp: gpsData.timestamp,
+      received_at: new Date().toISOString(),
+      raw_data: gpsData.raw_data
+    };
+
+    inMemoryPositions.push(position);
+    logger.info(`✅ GPS position saved (in-memory) for tracker ${gpsData.tracker_name}`, {
+      id: position.id,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      mapped: !!prideBoatId,
+      prideBoatId,
+      paradePosition
+    });
+    return position.id;
+  }
+
+  // If no mapping data provided, try to look it up
+  let kpnTrackerId = gpsData.kpn_tracker_id;
+  let prideBoatId = gpsData.pride_boat_id;
+  let paradePosition = gpsData.parade_position;
+
+  if (!kpnTrackerId || !prideBoatId) {
+    try {
+      const mappingQuery = `
+        SELECT
+          btm.kpn_tracker_id,
+          btm.pride_boat_id,
+          btm.parade_position,
+          kt.id as tracker_id,
+          pb.id as boat_id,
+          pb.parade_position as boat_position
+        FROM boat_tracker_mappings btm
+        LEFT JOIN kpn_trackers kt ON btm.kpn_tracker_id = kt.id
+        LEFT JOIN pride_boats pb ON btm.pride_boat_id = pb.id
+        WHERE btm.tracker_name = $1 AND btm.is_active = true
+        LIMIT 1
+      `;
+
+      const mappingResult = await pgPool.query(mappingQuery, [gpsData.tracker_name]);
+
+      if (mappingResult.rows.length > 0) {
+        const mapping = mappingResult.rows[0];
+        kpnTrackerId = kpnTrackerId || mapping.kpn_tracker_id;
+        prideBoatId = prideBoatId || mapping.pride_boat_id;
+        paradePosition = paradePosition || mapping.parade_position || mapping.boat_position;
+
+        logger.info(`🔗 Found mapping for tracker ${gpsData.tracker_name}:`, {
+          kpnTrackerId,
+          prideBoatId,
+          paradePosition
+        });
+      } else {
+        logger.debug(`⚠️ No mapping found for tracker ${gpsData.tracker_name}`);
+      }
+    } catch (mappingError) {
+      logger.warn('Error looking up tracker mapping:', mappingError);
+      // Continue with original values
+    }
   }
 
   const query = `
@@ -406,9 +524,9 @@ async function saveGPSPosition(gpsData) {
 
   const values = [
     gpsData.tracker_name,
-    gpsData.kpn_tracker_id,
-    gpsData.pride_boat_id,
-    gpsData.parade_position,
+    kpnTrackerId,
+    prideBoatId,
+    paradePosition,
     gpsData.latitude,
     gpsData.longitude,
     gpsData.altitude,
@@ -425,7 +543,10 @@ async function saveGPSPosition(gpsData) {
     logger.info(`✅ GPS position saved for tracker ${gpsData.tracker_name}`, {
       id: result.rows[0].id,
       latitude: gpsData.latitude,
-      longitude: gpsData.longitude
+      longitude: gpsData.longitude,
+      mapped: !!prideBoatId,
+      prideBoatId,
+      paradePosition
     });
     return result.rows[0].id;
   } catch (error) {
@@ -441,8 +562,24 @@ async function getLatestGPSPositions() {
   logger.info('📋 getLatestGPSPositions called');
 
   if (!pgPool) {
-    logger.warn('❌ No database connection, returning empty GPS positions');
-    return [];
+    // Return in-memory GPS positions
+    logger.info(`📊 Returning ${inMemoryPositions.length} in-memory GPS positions`);
+
+    // Get latest position per tracker
+    const latestByTracker = new Map();
+
+    // Sort all positions by timestamp descending
+    const sortedPositions = inMemoryPositions
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Keep only the latest position for each tracker
+    for (const position of sortedPositions) {
+      if (!latestByTracker.has(position.tracker_name)) {
+        latestByTracker.set(position.tracker_name, position);
+      }
+    }
+
+    return Array.from(latestByTracker.values());
   }
 
   // First check if table exists and has data
@@ -454,9 +591,9 @@ async function getLatestGPSPositions() {
     logger.error('❌ Error checking GPS positions count:', error);
   }
 
-  // Simple query first to debug
+  // Query to get latest position per tracker using window function
   const query = `
-    SELECT
+    SELECT DISTINCT ON (tracker_name)
       tracker_name,
       kpn_tracker_id,
       pride_boat_id,
@@ -470,8 +607,7 @@ async function getLatestGPSPositions() {
       raw_data,
       received_at
     FROM gps_positions
-    ORDER BY timestamp DESC
-    LIMIT 50
+    ORDER BY tracker_name, timestamp DESC
   `;
 
   try {
@@ -480,6 +616,220 @@ async function getLatestGPSPositions() {
     return result.rows;
   } catch (error) {
     logger.error('❌ Error getting latest GPS positions:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get GPS positions for a specific timestamp (timeline functionality)
+ * Returns the position of each tracker at or before the specified time
+ */
+async function getGPSPositionsAtTime(targetTimestamp, options = {}) {
+  logger.info('📅 getGPSPositionsAtTime called', {
+    targetTimestamp,
+    options
+  });
+
+  const { trackerNames = null, limit = 100 } = options;
+
+  if (!pgPool) {
+    // In-memory implementation for timeline
+    logger.info(`📊 Searching in-memory positions for time: ${targetTimestamp}`);
+
+    const targetTime = new Date(targetTimestamp);
+    const positionsAtTime = new Map();
+
+    // Sort all positions by timestamp
+    const sortedPositions = inMemoryPositions
+      .filter(pos => new Date(pos.timestamp) <= targetTime)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // Get the latest position for each tracker at or before target time
+    for (const position of sortedPositions) {
+      if (!positionsAtTime.has(position.tracker_name)) {
+        // Filter by tracker names if specified
+        if (!trackerNames || trackerNames.includes(position.tracker_name)) {
+          positionsAtTime.set(position.tracker_name, position);
+        }
+      }
+    }
+
+    const result = Array.from(positionsAtTime.values()).slice(0, limit);
+    logger.info(`✅ Found ${result.length} positions at time ${targetTimestamp}`);
+    return result;
+  }
+
+  // PostgreSQL implementation
+  let query = `
+    SELECT DISTINCT ON (tracker_name)
+      tracker_name,
+      kpn_tracker_id,
+      pride_boat_id,
+      parade_position,
+      latitude,
+      longitude,
+      altitude,
+      speed,
+      heading,
+      timestamp,
+      accuracy,
+      raw_data,
+      received_at
+    FROM gps_positions
+    WHERE timestamp <= $1
+  `;
+
+  const queryParams = [targetTimestamp];
+
+  if (trackerNames && trackerNames.length > 0) {
+    query += ` AND tracker_name = ANY($2)`;
+    queryParams.push(trackerNames);
+  }
+
+  query += `
+    ORDER BY tracker_name, timestamp DESC
+    LIMIT $${queryParams.length + 1}
+  `;
+  queryParams.push(limit);
+
+  try {
+    const result = await pgPool.query(query, queryParams);
+    logger.info(`✅ Retrieved ${result.rows.length} GPS positions at time ${targetTimestamp}`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting GPS positions at time:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get GPS positions within a time range for timeline analysis
+ */
+async function getGPSPositionsInTimeRange(startTime, endTime, options = {}) {
+  logger.info('📊 getGPSPositionsInTimeRange called', {
+    startTime,
+    endTime,
+    options
+  });
+
+  const { trackerNames = null, limit = 1000, interval = null } = options;
+
+  if (!pgPool) {
+    // In-memory implementation
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+
+    let filteredPositions = inMemoryPositions
+      .filter(pos => {
+        const posTime = new Date(pos.timestamp);
+        return posTime >= start && posTime <= end;
+      });
+
+    if (trackerNames && trackerNames.length > 0) {
+      filteredPositions = filteredPositions.filter(pos =>
+        trackerNames.includes(pos.tracker_name)
+      );
+    }
+
+    // Sort by timestamp descending
+    filteredPositions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    return filteredPositions.slice(0, limit);
+  }
+
+  // PostgreSQL implementation
+  let query = `
+    SELECT
+      tracker_name,
+      kpn_tracker_id,
+      pride_boat_id,
+      parade_position,
+      latitude,
+      longitude,
+      altitude,
+      speed,
+      heading,
+      timestamp,
+      accuracy,
+      raw_data,
+      received_at
+    FROM gps_positions
+    WHERE timestamp BETWEEN $1 AND $2
+  `;
+
+  const queryParams = [startTime, endTime];
+
+  if (trackerNames && trackerNames.length > 0) {
+    query += ` AND tracker_name = ANY($3)`;
+    queryParams.push(trackerNames);
+  }
+
+  query += `
+    ORDER BY timestamp DESC
+    LIMIT $${queryParams.length + 1}
+  `;
+  queryParams.push(limit);
+
+  try {
+    const result = await pgPool.query(query, queryParams);
+    logger.info(`✅ Retrieved ${result.rows.length} GPS positions in time range`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting GPS positions in time range:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get timeline metadata (earliest and latest timestamps, available trackers)
+ */
+async function getTimelineMetadata() {
+  logger.info('📈 getTimelineMetadata called');
+
+  if (!pgPool) {
+    // In-memory implementation
+    if (inMemoryPositions.length === 0) {
+      return {
+        earliestTimestamp: null,
+        latestTimestamp: null,
+        totalPositions: 0,
+        trackers: []
+      };
+    }
+
+    const timestamps = inMemoryPositions.map(pos => new Date(pos.timestamp));
+    const trackers = [...new Set(inMemoryPositions.map(pos => pos.tracker_name))];
+
+    return {
+      earliestTimestamp: new Date(Math.min(...timestamps)).toISOString(),
+      latestTimestamp: new Date(Math.max(...timestamps)).toISOString(),
+      totalPositions: inMemoryPositions.length,
+      trackers: trackers.sort()
+    };
+  }
+
+  // PostgreSQL implementation
+  const query = `
+    SELECT
+      MIN(timestamp) as earliest_timestamp,
+      MAX(timestamp) as latest_timestamp,
+      COUNT(*) as total_positions,
+      ARRAY_AGG(DISTINCT tracker_name ORDER BY tracker_name) as trackers
+    FROM gps_positions
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    const row = result.rows[0];
+
+    return {
+      earliestTimestamp: row.earliest_timestamp,
+      latestTimestamp: row.latest_timestamp,
+      totalPositions: parseInt(row.total_positions),
+      trackers: row.trackers || []
+    };
+  } catch (error) {
+    logger.error('❌ Error getting timeline metadata:', error);
     throw error;
   }
 }
@@ -1030,7 +1380,41 @@ async function getActiveBoatTrackerMappings(prideBoatId) {
  */
 async function createBoatTrackerMapping(mappingData) {
   if (!pgPool) {
-    throw new Error('Database not available');
+    // In-memory fallback
+    // Find the tracker name from the KPN tracker
+    let trackerName = mappingData.tracker_name;
+    if (!trackerName && mappingData.kpn_tracker_id) {
+      const tracker = inMemoryKPNTrackers.find(t => t.id === mappingData.kpn_tracker_id);
+      if (tracker) {
+        trackerName = tracker.tracker_name;
+      }
+    }
+
+    // Find the parade position from the pride boat
+    let paradePosition = mappingData.parade_position;
+    if (!paradePosition && mappingData.pride_boat_id) {
+      const boat = inMemoryBoats.find(b => b.id === mappingData.pride_boat_id);
+      if (boat) {
+        paradePosition = boat.parade_position;
+      }
+    }
+
+    const newMapping = {
+      id: inMemoryBoatTrackerMappings.length + 1,
+      pride_boat_id: mappingData.pride_boat_id,
+      kpn_tracker_id: mappingData.kpn_tracker_id,
+      parade_position: paradePosition,
+      tracker_name: trackerName,
+      asset_code: mappingData.asset_code || null,
+      is_active: mappingData.is_active !== undefined ? mappingData.is_active : true,
+      mapped_at: new Date().toISOString(),
+      mapped_by: mappingData.mapped_by || 'system',
+      notes: mappingData.notes || null
+    };
+
+    inMemoryBoatTrackerMappings.push(newMapping);
+    logger.info(`Boat-tracker mapping created (in-memory): Pride Boat ${mappingData.pride_boat_id} -> KPN Tracker ${mappingData.kpn_tracker_id}`);
+    return newMapping;
   }
 
   const query = `
@@ -1527,7 +1911,7 @@ async function createKPNTracker(trackerData) {
   if (!pgPool) {
     // In-memory fallback
     const newTracker = {
-      id: inMemoryDeviceMappings.length + 1,
+      id: inMemoryKPNTrackers.length + 1,
       tracker_name: trackerData.tracker_name,
       asset_code: trackerData.asset_code,
       device_type: trackerData.device_type || null,
@@ -1536,7 +1920,7 @@ async function createKPNTracker(trackerData) {
       created_at: new Date().toISOString()
     };
 
-    inMemoryDeviceMappings.push(newTracker);
+    inMemoryKPNTrackers.push(newTracker);
     logger.info(`KPN tracker created (in-memory): ${trackerData.tracker_name}`, { asset_code: trackerData.asset_code });
     return newTracker;
   }
@@ -2758,20 +3142,114 @@ async function saveGPSPositionDirect(gpsData) {
   });
 
   if (!pgPool) {
-    logger.warn('❌ No database connection, skipping GPS position save');
-    return;
+    // In-memory fallback - try to find mapping
+    let kpnTrackerId = null;
+    let prideBoatId = null;
+    let paradePosition = null;
+
+    // Look for mapping in in-memory mappings
+    const mapping = inMemoryBoatTrackerMappings.find(m =>
+      m.tracker_name === gpsData.tracker_name && m.is_active
+    );
+
+    if (mapping) {
+      kpnTrackerId = mapping.kpn_tracker_id;
+      prideBoatId = mapping.pride_boat_id;
+      paradePosition = mapping.parade_position;
+
+      logger.info(`🔗 Found in-memory mapping for tracker ${gpsData.tracker_name}:`, {
+        kpnTrackerId,
+        prideBoatId,
+        paradePosition
+      });
+    } else {
+      logger.debug(`⚠️ No in-memory mapping found for tracker ${gpsData.tracker_name}`);
+    }
+
+    const newPosition = {
+      id: inMemoryPositions.length + 1,
+      tracker_name: gpsData.tracker_name,
+      kpn_tracker_id: kpnTrackerId,
+      pride_boat_id: prideBoatId,
+      parade_position: paradePosition,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      altitude: gpsData.altitude,
+      accuracy: gpsData.accuracy,
+      speed: gpsData.speed,
+      heading: gpsData.heading,
+      timestamp: gpsData.timestamp,
+      raw_data: gpsData.raw_data,
+      received_at: new Date().toISOString()
+    };
+
+    inMemoryPositions.push(newPosition);
+    logger.info(`✅ GPS position saved (in-memory) for tracker ${gpsData.tracker_name}`, {
+      id: newPosition.id,
+      mapped: !!prideBoatId,
+      prideBoatId,
+      paradePosition,
+      totalPositions: inMemoryPositions.length
+    });
+    return newPosition.id;
+  }
+
+  // First, try to find mapping for this tracker
+  let kpnTrackerId = null;
+  let prideBoatId = null;
+  let paradePosition = null;
+
+  try {
+    const mappingQuery = `
+      SELECT
+        btm.kpn_tracker_id,
+        btm.pride_boat_id,
+        btm.parade_position,
+        kt.id as tracker_id,
+        pb.id as boat_id,
+        pb.parade_position as boat_position
+      FROM boat_tracker_mappings btm
+      LEFT JOIN kpn_trackers kt ON btm.kpn_tracker_id = kt.id
+      LEFT JOIN pride_boats pb ON btm.pride_boat_id = pb.id
+      WHERE btm.tracker_name = $1 AND btm.is_active = true
+      LIMIT 1
+    `;
+
+    const mappingResult = await pgPool.query(mappingQuery, [gpsData.tracker_name]);
+
+    if (mappingResult.rows.length > 0) {
+      const mapping = mappingResult.rows[0];
+      kpnTrackerId = mapping.kpn_tracker_id;
+      prideBoatId = mapping.pride_boat_id;
+      paradePosition = mapping.parade_position || mapping.boat_position;
+
+      logger.info(`🔗 Found mapping for tracker ${gpsData.tracker_name}:`, {
+        kpnTrackerId,
+        prideBoatId,
+        paradePosition
+      });
+    } else {
+      logger.debug(`⚠️ No mapping found for tracker ${gpsData.tracker_name}`);
+    }
+  } catch (mappingError) {
+    logger.warn('Error looking up tracker mapping:', mappingError);
+    // Continue without mapping
   }
 
   const query = `
     INSERT INTO gps_positions (
-      tracker_name, latitude, longitude, altitude, accuracy, speed, heading,
+      tracker_name, kpn_tracker_id, pride_boat_id, parade_position,
+      latitude, longitude, altitude, accuracy, speed, heading,
       timestamp, raw_data
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     RETURNING id
   `;
 
   const values = [
     gpsData.tracker_name,
+    kpnTrackerId,
+    prideBoatId,
+    paradePosition,
     gpsData.latitude,
     gpsData.longitude,
     gpsData.altitude,
@@ -2804,6 +3282,9 @@ module.exports = {
   saveBoatPosition,
   saveGPSPosition,
   getLatestGPSPositions,
+  getGPSPositionsAtTime,
+  getGPSPositionsInTimeRange,
+  getTimelineMetadata,
   saveBoatIncident,
   getBoatPositionHistory,
   cacheSet,

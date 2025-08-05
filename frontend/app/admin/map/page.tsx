@@ -49,6 +49,8 @@ export default function LiveMapPage() {
   const [currentTime, setCurrentTime] = useState('12:00');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [timelineMetadata, setTimelineMetadata] = useState<any>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Filtered positions for current time
@@ -79,9 +81,73 @@ export default function LiveMapPage() {
     }
   };
 
+  const fetchTimelinePositions = async (targetTime: string) => {
+    try {
+      console.log('📅 Fetching timeline positions for:', targetTime);
+      const targetDateTime = new Date(`${selectedDate}T${targetTime}:00`).toISOString();
+      const response = await fetch(`/api/webhooks/gps-timeline/at-time?timestamp=${targetDateTime}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          console.log('✅ Timeline positions fetched:', data.data.length);
+          return data.data;
+        }
+      }
+      console.warn('⚠️ No timeline data received');
+      return [];
+    } catch (error) {
+      console.error('❌ Error fetching timeline positions:', error);
+      return [];
+    }
+  };
+
+  const fetchTimelineMetadata = async () => {
+    try {
+      setTimelineLoading(true);
+      console.log('📊 Fetching timeline metadata...');
+      const response = await fetch('/api/webhooks/gps-timeline/metadata');
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setTimelineMetadata(data.data);
+          console.log('✅ Timeline metadata fetched:', data.data);
+
+          // Auto-set date and time range based on available data
+          if (data.data.earliestTimestamp && data.data.latestTimestamp) {
+            const earliest = new Date(data.data.earliestTimestamp);
+            const latest = new Date(data.data.latestTimestamp);
+
+            // Set date to the latest date with data
+            setSelectedDate(latest.toISOString().split('T')[0]);
+
+            // Set time range based on actual data
+            const earliestTime = earliest.toTimeString().slice(0, 5);
+            const latestTime = latest.toTimeString().slice(0, 5);
+            setStartTime(earliestTime);
+            setEndTime(latestTime);
+            setCurrentTime(latestTime); // Start at the latest time
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error fetching timeline metadata:', error);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchGPSPositions();
   }, []);
+
+  // Fetch timeline metadata when switching to timeline mode
+  useEffect(() => {
+    if (!isLiveMode) {
+      fetchTimelineMetadata();
+    }
+  }, [isLiveMode]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -139,32 +205,15 @@ export default function LiveMapPage() {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
-  const filterPositionsByTime = (targetTime: string) => {
+  const filterPositionsByTime = async (targetTime: string) => {
     if (isLiveMode) {
       setFilteredPositions(positions);
       return;
     }
 
-    const targetDateTime = new Date(`${selectedDate}T${targetTime}:00`);
-    const targetTimestamp = targetDateTime.getTime();
-
-    // Group positions by tracker and find closest to target time
-    const trackerPositions = new Map<string, GPSPosition>();
-
-    positions.forEach(position => {
-      const positionTime = new Date(position.timestamp).getTime();
-      const timeDiff = Math.abs(positionTime - targetTimestamp);
-
-      // Only include positions within 4 hours of target time
-      if (timeDiff <= 4 * 60 * 60 * 1000) {
-        const existing = trackerPositions.get(position.tracker_name);
-        if (!existing || Math.abs(new Date(existing.timestamp).getTime() - targetTimestamp) > timeDiff) {
-          trackerPositions.set(position.tracker_name, position);
-        }
-      }
-    });
-
-    setFilteredPositions(Array.from(trackerPositions.values()));
+    // Use timeline API for historical data
+    const timelinePositions = await fetchTimelinePositions(targetTime);
+    setFilteredPositions(timelinePositions);
   };
 
   const togglePlayback = () => {
@@ -213,6 +262,36 @@ export default function LiveMapPage() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
+      <style jsx>{`
+        .timeline-slider::-webkit-slider-thumb {
+          appearance: none;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          border: 3px solid white;
+          cursor: pointer;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .timeline-slider::-moz-range-thumb {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          border: 3px solid white;
+          cursor: pointer;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .timeline-slider::-webkit-slider-track {
+          height: 12px;
+          border-radius: 6px;
+        }
+        .timeline-slider::-moz-range-track {
+          height: 12px;
+          border-radius: 6px;
+          background: #374151;
+        }
+      `}</style>
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -315,9 +394,23 @@ export default function LiveMapPage() {
         {!isLiveMode && (
           <Card className="bg-gray-800 border-gray-700 mb-8">
             <CardHeader>
-              <CardTitle className="text-white">Timeline Controls</CardTitle>
+              <CardTitle className="text-white flex items-center gap-2">
+                Timeline Controls
+                {timelineLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
+              </CardTitle>
               <CardDescription className="text-gray-400">
-                Scrub through historical GPS data
+                {timelineMetadata ? (
+                  <>
+                    Scrub through historical GPS data • {timelineMetadata.totalPositions} positions • {timelineMetadata.trackers?.length || 0} trackers
+                    {timelineMetadata.earliestTimestamp && timelineMetadata.latestTimestamp && (
+                      <div className="mt-1 text-xs">
+                        Data available: {new Date(timelineMetadata.earliestTimestamp).toLocaleString('nl-NL')} - {new Date(timelineMetadata.latestTimestamp).toLocaleString('nl-NL')}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  'Loading timeline data...'
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -398,20 +491,94 @@ export default function LiveMapPage() {
               </div>
 
               {/* Time Slider */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm text-gray-400">
-                  <span>{startTime}</span>
-                  <span className="text-white font-medium">{currentTime}</span>
-                  <span>{endTime}</span>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center text-sm">
+                  <div className="text-gray-400">
+                    <span className="block">{startTime}</span>
+                    <span className="text-xs">Start</span>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-white font-bold text-lg">{currentTime}</span>
+                    <div className="text-xs text-gray-400">Current Time</div>
+                    {timelineMetadata && (
+                      <div className="text-xs text-blue-400 mt-1">
+                        {filteredPositions.length} trackers visible
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-gray-400 text-right">
+                    <span className="block">{endTime}</span>
+                    <span className="text-xs">End</span>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min={timeToMinutes(startTime)}
-                  max={timeToMinutes(endTime)}
-                  value={timeToMinutes(currentTime)}
-                  onChange={(e) => setCurrentTime(minutesToTime(Number(e.target.value)))}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
-                />
+
+                {/* Enhanced Slider */}
+                <div className="relative">
+                  <input
+                    type="range"
+                    min={timeToMinutes(startTime)}
+                    max={timeToMinutes(endTime)}
+                    value={timeToMinutes(currentTime)}
+                    onChange={(e) => setCurrentTime(minutesToTime(Number(e.target.value)))}
+                    className="w-full h-3 bg-gray-700 rounded-lg appearance-none cursor-pointer timeline-slider"
+                    style={{
+                      background: `linear-gradient(to right,
+                        #3b82f6 0%,
+                        #3b82f6 ${((timeToMinutes(currentTime) - timeToMinutes(startTime)) / (timeToMinutes(endTime) - timeToMinutes(startTime))) * 100}%,
+                        #374151 ${((timeToMinutes(currentTime) - timeToMinutes(startTime)) / (timeToMinutes(endTime) - timeToMinutes(startTime))) * 100}%,
+                        #374151 100%)`
+                    }}
+                  />
+
+                  {/* Timeline markers */}
+                  {timelineMetadata && timelineMetadata.trackers && (
+                    <div className="absolute top-0 left-0 right-0 h-3 pointer-events-none">
+                      {/* Add visual markers for data density */}
+                      <div className="relative h-full">
+                        {Array.from({ length: 24 }, (_, i) => {
+                          const hour = Math.floor(timeToMinutes(startTime) / 60) + i;
+                          const hourMinutes = hour * 60;
+                          if (hourMinutes >= timeToMinutes(startTime) && hourMinutes <= timeToMinutes(endTime)) {
+                            const position = ((hourMinutes - timeToMinutes(startTime)) / (timeToMinutes(endTime) - timeToMinutes(startTime))) * 100;
+                            return (
+                              <div
+                                key={i}
+                                className="absolute w-0.5 h-full bg-gray-500 opacity-30"
+                                style={{ left: `${position}%` }}
+                              />
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick time jumps */}
+                <div className="flex justify-center gap-2 mt-2">
+                  <button
+                    onClick={() => setCurrentTime(startTime)}
+                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                  >
+                    Start
+                  </button>
+                  <button
+                    onClick={() => {
+                      const midTime = minutesToTime(Math.floor((timeToMinutes(startTime) + timeToMinutes(endTime)) / 2));
+                      setCurrentTime(midTime);
+                    }}
+                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                  >
+                    Middle
+                  </button>
+                  <button
+                    onClick={() => setCurrentTime(endTime)}
+                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                  >
+                    End
+                  </button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -429,7 +596,18 @@ export default function LiveMapPage() {
               )}
             </CardTitle>
             <CardDescription className="text-gray-400">
-              {isLiveMode ? 'Live GPS positions' : 'Historical GPS positions'} - {filteredPositions.length} trackers visible
+              {isLiveMode ? (
+                <>Live GPS positions - {filteredPositions.length} trackers visible</>
+              ) : (
+                <>
+                  Historical GPS positions at {currentTime} - {filteredPositions.length} trackers visible
+                  {timelineMetadata && (
+                    <span className="ml-2 text-blue-400">
+                      • {timelineMetadata.trackers?.length || 0} total trackers available
+                    </span>
+                  )}
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent>
