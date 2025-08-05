@@ -17,8 +17,8 @@ interface GPSPosition {
   kpn_tracker_id: number;
   pride_boat_id: number | null;
   parade_position: number | null;
-  latitude: number;
-  longitude: number;
+  latitude: number | string;
+  longitude: number | string;
   altitude: number | null;
   speed: number | null;
   heading: number | null;

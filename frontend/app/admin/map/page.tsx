@@ -23,8 +23,8 @@ interface GPSPosition {
   kpn_tracker_id: number;
   pride_boat_id: number | null;
   parade_position: number | null;
-  latitude: number;
-  longitude: number;
+  latitude: number | string;
+  longitude: number | string;
   altitude: number | null;
   speed: number | null;
   heading: number | null;
@@ -507,11 +507,11 @@ export default function LiveMapPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <p className="text-gray-400">Latitude</p>
-                        <p className="text-white font-mono">{position.latitude.toFixed(6)}</p>
+                        <p className="text-white font-mono">{parseFloat(position.latitude.toString()).toFixed(6)}</p>
                       </div>
                       <div>
                         <p className="text-gray-400">Longitude</p>
-                        <p className="text-white font-mono">{position.longitude.toFixed(6)}</p>
+                        <p className="text-white font-mono">{parseFloat(position.longitude.toString()).toFixed(6)}</p>
                       </div>
                       <div>
                         <p className="text-gray-400">Speed</p>
