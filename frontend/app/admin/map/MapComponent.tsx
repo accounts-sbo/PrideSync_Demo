@@ -164,10 +164,13 @@ export default function MapComponent({ positions }: MapComponentProps) {
     });
 
     // Fit map to show all markers if there are any
-    if (positions.length > 0) {
-      const group = new L.featureGroup(markersRef.current.getLayers());
-      if (group.getBounds().isValid()) {
-        mapRef.current.fitBounds(group.getBounds(), { padding: [20, 20] });
+    if (positions.length > 0 && markersRef.current) {
+      const layers = markersRef.current.getLayers();
+      if (layers.length > 0) {
+        const group = L.featureGroup(layers);
+        if (group.getBounds().isValid()) {
+          mapRef.current.fitBounds(group.getBounds(), { padding: [20, 20] });
+        }
       }
     }
   }, [positions]);
