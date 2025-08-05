@@ -121,8 +121,10 @@ export default function LiveMapPage() {
     return 'bg-red-500';
   };
 
-  const getGoogleMapsUrl = (lat: number, lng: number) => {
-    return `https://www.google.com/maps?q=${lat},${lng}&z=15`;
+  const getGoogleMapsUrl = (lat: number | string, lng: number | string) => {
+    const latNum = typeof lat === 'string' ? parseFloat(lat) : lat;
+    const lngNum = typeof lng === 'string' ? parseFloat(lng) : lng;
+    return `https://www.google.com/maps?q=${latNum},${lngNum}&z=15`;
   };
 
   // Timeline functions
