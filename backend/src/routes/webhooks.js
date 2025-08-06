@@ -918,17 +918,43 @@ router.post('/kpn-serial', logWebhookMiddleware, async (req, res) => {
         // Try different timestamp formats
         timestamp = record.GpsUTC || record.DateUTC || record.timestamp || record.time || new Date().toISOString();
 
-        if (lat && lng) {
+        if (lat && lng && serNo) {
+          const gpsData = {
+            ser_no: serNo,
+            latitude: parseFloat(lat),
+            longitude: parseFloat(lng),
+            altitude: record.Alt || record.altitude || null,
+            accuracy: record.Accuracy || record.accuracy || null,
+            speed: record.Speed || record.speed || null,
+            heading: record.Dir || record.direction || record.heading || null,
+            timestamp: new Date(timestamp),
+            raw_data: record
+          };
+
+          // Save GPS position to database
+          try {
+            await database.saveGPSPositionSimple(gpsData);
+            logger.info('✅ GPS position saved to database:', {
+              serNo,
+              lat,
+              lng,
+              timestamp
+            });
+          } catch (saveError) {
+            logger.error('❌ Failed to save GPS position:', saveError);
+          }
+
           processedRecords.push({
             latitude: lat,
             longitude: lng,
             timestamp: timestamp,
             serNo: serNo,
             imei: imei,
-            rawRecord: record
+            rawRecord: record,
+            saved: true
           });
 
-          logger.info('GPS data extracted:', {
+          logger.info('GPS data extracted and saved:', {
             serNo,
             imei,
             lat,
@@ -1072,12 +1098,12 @@ router.get('/gps-positions', async (req, res) => {
 });
 
 /**
- * Get GPS Positions at Specific Time (Timeline)
+ * Get GPS Positions at Specific Time (Timeline) - Using Webhooks
  * GET /api/webhooks/gps-timeline/at-time
  *
  * Query parameters:
  * - timestamp: ISO timestamp to get positions for
- * - trackers: Optional comma-separated list of tracker names
+ * - trackers: Optional comma-separated list of SerNo values
  * - limit: Optional limit (default 100)
  */
 router.get('/gps-timeline/at-time', async (req, res) => {
@@ -1091,22 +1117,21 @@ router.get('/gps-timeline/at-time', async (req, res) => {
       });
     }
 
-    const options = {
-      limit: parseInt(limit),
-      trackerNames: trackers ? trackers.split(',').map(t => t.trim()) : null
-    };
+    const serNoFilter = trackers ? trackers.split(',').map(t => t.trim()) : null;
 
-    const positions = await database.getGPSPositionsAtTime(timestamp, options);
+    // Use webhook-based timeline data
+    const positions = await database.getGPSPositionsAtTimeFromWebhooks(timestamp, serNoFilter);
 
     res.json({
       success: true,
       data: positions,
       count: positions.length,
       timestamp: timestamp,
+      source: 'webhooks',
       requestedAt: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error fetching GPS positions at time:', error);
+    logger.error('Error fetching GPS positions at time from webhooks:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch GPS positions at time',
@@ -1116,13 +1141,13 @@ router.get('/gps-timeline/at-time', async (req, res) => {
 });
 
 /**
- * Get GPS Positions in Time Range (Timeline)
+ * Get GPS Positions in Time Range (Timeline) - Using Webhooks
  * GET /api/webhooks/gps-timeline/range
  *
  * Query parameters:
  * - startTime: ISO timestamp for start of range
  * - endTime: ISO timestamp for end of range
- * - trackers: Optional comma-separated list of tracker names
+ * - trackers: Optional comma-separated list of SerNo values
  * - limit: Optional limit (default 1000)
  */
 router.get('/gps-timeline/range', async (req, res) => {
@@ -1136,22 +1161,21 @@ router.get('/gps-timeline/range', async (req, res) => {
       });
     }
 
-    const options = {
-      limit: parseInt(limit),
-      trackerNames: trackers ? trackers.split(',').map(t => t.trim()) : null
-    };
+    const serNoFilter = trackers ? trackers.split(',').map(t => t.trim()) : null;
 
-    const positions = await database.getGPSPositionsInTimeRange(startTime, endTime, options);
+    // Use webhook-based timeline data
+    const positions = await database.getGPSPositionsFromWebhooks(startTime, endTime, serNoFilter);
 
     res.json({
       success: true,
       data: positions,
       count: positions.length,
       timeRange: { startTime, endTime },
+      source: 'webhooks',
       requestedAt: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error fetching GPS positions in time range:', error);
+    logger.error('Error fetching GPS positions in time range from webhooks:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch GPS positions in time range',
@@ -1382,6 +1406,109 @@ router.post('/create-demo-mappings', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to create demo mappings',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Create Simplified Demo Mappings (SerNo -> Boat)
+ * POST /api/webhooks/create-simple-mappings
+ *
+ * Creates simplified tracker-boat mappings using SerNo directly
+ */
+router.post('/create-simple-mappings', async (req, res) => {
+  try {
+    logger.info('🔧 Creating simplified tracker-boat mappings...');
+
+    // Demo mappings data with real SerNo values from webhooks
+    const demoMappings = [
+      { ser_no: '1424670', parade_position: 1, boat_name: 'Pride Unity', organisation: 'Amsterdam Pride', asset_code: 'P1' },
+      { ser_no: '1424679', parade_position: 2, boat_name: 'Pride Harmony', organisation: 'Amsterdam Pride', asset_code: 'P2' },
+      { ser_no: '1424493', parade_position: 3, boat_name: 'Pride Freedom', organisation: 'Amsterdam Pride', asset_code: 'P3' },
+      { ser_no: '1424487', parade_position: 4, boat_name: 'Pride Equality', organisation: 'Amsterdam Pride', asset_code: 'P4' },
+      { ser_no: '1424671', parade_position: 5, boat_name: 'Pride Power', organisation: 'Amsterdam Pride', asset_code: 'P5' },
+      { ser_no: '1327047', parade_position: 6, boat_name: 'Pride Victory', organisation: 'Amsterdam Pride', asset_code: 'P6' },
+      { ser_no: '1424678', parade_position: 7, boat_name: 'Pride Spirit', organisation: 'Amsterdam Pride', asset_code: 'P7' }
+    ];
+
+    let mappingsCreated = 0;
+    const results = [];
+
+    for (const mapping of demoMappings) {
+      try {
+        const trackerBoat = await database.createTrackerBoat({
+          ser_no: mapping.ser_no,
+          boat_name: mapping.boat_name,
+          organisation: mapping.organisation,
+          parade_position: mapping.parade_position,
+          theme: 'Pride 2025 Demo',
+          description: `Demo boat for testing - ${mapping.boat_name}`,
+          asset_code: mapping.asset_code,
+          is_active: true
+        });
+
+        mappingsCreated++;
+        results.push({
+          ser_no: mapping.ser_no,
+          parade_position: mapping.parade_position,
+          boat_name: mapping.boat_name,
+          id: trackerBoat.id
+        });
+
+        logger.info(`✅ Simple mapping created: ${mapping.boat_name} (${mapping.ser_no}) -> Position ${mapping.parade_position}`);
+
+      } catch (mappingError) {
+        logger.error(`❌ Failed to create mapping for ${mapping.ser_no}:`, mappingError);
+        results.push({
+          ser_no: mapping.ser_no,
+          error: mappingError.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Created ${mappingsCreated} simplified tracker-boat mappings`,
+      mappingsCreated,
+      totalAttempted: demoMappings.length,
+      results,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    logger.error('❌ Failed to create simplified mappings:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create simplified mappings',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get GPS Positions (Simplified)
+ * GET /api/webhooks/gps-positions-simple
+ *
+ * Returns GPS positions with boat information using simplified SerNo approach
+ */
+router.get('/gps-positions-simple', async (req, res) => {
+  try {
+    logger.info('📍 Getting simplified GPS positions...');
+
+    const positions = await database.getLatestGPSPositionsSimple();
+
+    res.json({
+      success: true,
+      data: positions,
+      count: positions.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('❌ Error fetching simplified GPS positions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch GPS positions',
       message: error.message
     });
   }

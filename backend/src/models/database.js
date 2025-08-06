@@ -184,28 +184,37 @@ async function createTables() {
     );
   `;
 
-  // GPS Positions table (linked to trackers)
+  // Simplified tracker-boat mapping (SerNo -> boat info)
+  const createTrackerBoatsTable = `
+    CREATE TABLE IF NOT EXISTS tracker_boats (
+      id SERIAL PRIMARY KEY,
+      ser_no VARCHAR(50) UNIQUE NOT NULL, -- SerNo from KPN webhook
+      boat_name VARCHAR(255) NOT NULL,
+      organisation VARCHAR(255),
+      parade_position INTEGER UNIQUE,
+      theme TEXT,
+      description TEXT,
+      asset_code VARCHAR(20), -- P1, P2, etc.
+      is_active BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+
+  // GPS Positions table (simplified - direct SerNo link)
   const createPositionsTable = `
     CREATE TABLE IF NOT EXISTS gps_positions (
       id SERIAL PRIMARY KEY,
-      tracker_name VARCHAR(50) NOT NULL, -- KPN tracker name from webhook
-      kpn_tracker_id INTEGER,
-      pride_boat_id INTEGER,
-      parade_position INTEGER,
+      ser_no VARCHAR(50) NOT NULL, -- SerNo from webhook (direct link)
       latitude DECIMAL(10, 8) NOT NULL,
       longitude DECIMAL(11, 8) NOT NULL,
-      route_distance INTEGER DEFAULT 0,
-      route_progress DECIMAL(5, 2) DEFAULT 0,
-      speed DECIMAL(5, 2) DEFAULT 0,
-      heading INTEGER DEFAULT 0,
-      distance_from_route DECIMAL(6, 2) DEFAULT 0,
       altitude DECIMAL(8, 2),
       accuracy DECIMAL(6, 2),
+      speed DECIMAL(5, 2) DEFAULT 0,
+      heading INTEGER DEFAULT 0,
       timestamp TIMESTAMP NOT NULL,
       received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      raw_data JSONB, -- Store original webhook data
-      FOREIGN KEY (kpn_tracker_id) REFERENCES kpn_trackers(id) ON DELETE SET NULL,
-      FOREIGN KEY (pride_boat_id) REFERENCES pride_boats(id) ON DELETE SET NULL
+      raw_data JSONB -- Store original webhook data
     );
   `;
 
@@ -267,20 +276,29 @@ async function createTables() {
   `;
 
   const createIndexes = `
-    CREATE INDEX IF NOT EXISTS idx_gps_positions_tracker_name ON gps_positions(tracker_name);
+    -- New simplified indexes
+    CREATE INDEX IF NOT EXISTS idx_gps_positions_ser_no ON gps_positions(ser_no);
     CREATE INDEX IF NOT EXISTS idx_gps_positions_timestamp ON gps_positions(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_gps_positions_pride_boat ON gps_positions(pride_boat_id);
+    CREATE INDEX IF NOT EXISTS idx_tracker_boats_ser_no ON tracker_boats(ser_no);
+    CREATE INDEX IF NOT EXISTS idx_tracker_boats_active ON tracker_boats(is_active);
+    CREATE INDEX IF NOT EXISTS idx_tracker_boats_position ON tracker_boats(parade_position);
+
+    -- Webhook logs indexes for timeline queries
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint);
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_body_serno ON webhook_logs USING GIN ((body->>'SerNo'));
+
+    -- Legacy indexes (keep for compatibility)
     CREATE INDEX IF NOT EXISTS idx_boat_tracker_mappings_active ON boat_tracker_mappings(is_active);
     CREATE INDEX IF NOT EXISTS idx_kpn_trackers_asset_code ON kpn_trackers(asset_code);
     CREATE INDEX IF NOT EXISTS idx_pride_boats_position ON pride_boats(parade_position);
-    CREATE INDEX IF NOT EXISTS idx_webhook_logs_endpoint ON webhook_logs(endpoint);
-    CREATE INDEX IF NOT EXISTS idx_webhook_logs_created_at ON webhook_logs(created_at);
   `;
 
   try {
     await pgPool.query(createPrideBoatsTable);
     await pgPool.query(createKPNTrackersTable);
     await pgPool.query(createBoatTrackerMappingsTable);
+    await pgPool.query(createTrackerBoatsTable);
     await pgPool.query(createVotesTable);
     await pgPool.query(createPositionsTable);
     await pgPool.query(createGPSIndexes);
@@ -551,6 +569,352 @@ async function saveGPSPosition(gpsData) {
     return result.rows[0].id;
   } catch (error) {
     logger.error(`Error saving GPS position for tracker ${gpsData.tracker_name}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Save GPS position with simplified SerNo-based approach
+ */
+async function saveGPSPositionSimple(gpsData) {
+  logger.info('📍 saveGPSPositionSimple called with data:', {
+    ser_no: gpsData.ser_no,
+    latitude: gpsData.latitude,
+    longitude: gpsData.longitude,
+    timestamp: gpsData.timestamp
+  });
+
+  if (!pgPool) {
+    // In-memory fallback
+    const newPosition = {
+      id: inMemoryPositions.length + 1,
+      ser_no: gpsData.ser_no,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude,
+      altitude: gpsData.altitude,
+      accuracy: gpsData.accuracy,
+      speed: gpsData.speed,
+      heading: gpsData.heading,
+      timestamp: gpsData.timestamp,
+      raw_data: gpsData.raw_data,
+      received_at: new Date().toISOString()
+    };
+
+    inMemoryPositions.push(newPosition);
+    logger.info(`✅ GPS position saved (in-memory) for SerNo ${gpsData.ser_no}`, {
+      id: newPosition.id,
+      totalPositions: inMemoryPositions.length
+    });
+    return newPosition.id;
+  }
+
+  const query = `
+    INSERT INTO gps_positions (
+      ser_no, latitude, longitude, altitude, accuracy, speed, heading,
+      timestamp, raw_data
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING id
+  `;
+
+  const values = [
+    gpsData.ser_no,
+    gpsData.latitude,
+    gpsData.longitude,
+    gpsData.altitude,
+    gpsData.accuracy,
+    gpsData.speed,
+    gpsData.heading,
+    gpsData.timestamp,
+    JSON.stringify(gpsData.raw_data)
+  ];
+
+  try {
+    logger.info('💾 Inserting GPS position into database...');
+    const result = await pgPool.query(query, values);
+    logger.info(`✅ GPS position saved for SerNo ${gpsData.ser_no}`, {
+      id: result.rows[0].id,
+      latitude: gpsData.latitude,
+      longitude: gpsData.longitude
+    });
+    return result.rows[0].id;
+  } catch (error) {
+    logger.error(`Error saving GPS position for SerNo ${gpsData.ser_no}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get latest GPS positions with boat information (simplified)
+ */
+async function getLatestGPSPositionsSimple() {
+  logger.info('📋 getLatestGPSPositionsSimple called');
+
+  if (!pgPool) {
+    // In-memory implementation - get latest position per SerNo
+    const latestBySerNo = new Map();
+
+    const sortedPositions = inMemoryPositions
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    for (const position of sortedPositions) {
+      if (!latestBySerNo.has(position.ser_no)) {
+        latestBySerNo.set(position.ser_no, position);
+      }
+    }
+
+    const result = Array.from(latestBySerNo.values());
+    logger.info(`📊 Returning ${result.length} in-memory GPS positions`);
+    return result;
+  }
+
+  // PostgreSQL query with boat information
+  const query = `
+    SELECT DISTINCT ON (gps.ser_no)
+      gps.ser_no,
+      gps.latitude,
+      gps.longitude,
+      gps.altitude,
+      gps.accuracy,
+      gps.speed,
+      gps.heading,
+      gps.timestamp,
+      gps.received_at,
+      gps.raw_data,
+      tb.boat_name,
+      tb.organisation,
+      tb.parade_position,
+      tb.theme,
+      tb.asset_code,
+      tb.is_active as boat_mapped
+    FROM gps_positions gps
+    LEFT JOIN tracker_boats tb ON gps.ser_no = tb.ser_no AND tb.is_active = true
+    ORDER BY gps.ser_no, gps.timestamp DESC
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    logger.info(`✅ Retrieved ${result.rows.length} GPS positions with boat info`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting latest GPS positions:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create or update tracker-boat mapping
+ */
+async function createTrackerBoat(trackerBoatData) {
+  logger.info('🚤 Creating tracker-boat mapping:', trackerBoatData);
+
+  if (!pgPool) {
+    // In-memory fallback
+    const existing = inMemoryBoats.find(b => b.ser_no === trackerBoatData.ser_no);
+    if (existing) {
+      // Update existing
+      Object.assign(existing, trackerBoatData, { updated_at: new Date().toISOString() });
+      logger.info(`Updated tracker-boat mapping (in-memory): ${trackerBoatData.ser_no}`);
+      return existing;
+    } else {
+      // Create new
+      const newTrackerBoat = {
+        id: inMemoryBoats.length + 1,
+        ...trackerBoatData,
+        is_active: trackerBoatData.is_active !== undefined ? trackerBoatData.is_active : true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      inMemoryBoats.push(newTrackerBoat);
+      logger.info(`Created tracker-boat mapping (in-memory): ${trackerBoatData.ser_no}`);
+      return newTrackerBoat;
+    }
+  }
+
+  const query = `
+    INSERT INTO tracker_boats (
+      ser_no, boat_name, organisation, parade_position, theme, description, asset_code, is_active
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT (ser_no) DO UPDATE SET
+      boat_name = EXCLUDED.boat_name,
+      organisation = EXCLUDED.organisation,
+      parade_position = EXCLUDED.parade_position,
+      theme = EXCLUDED.theme,
+      description = EXCLUDED.description,
+      asset_code = EXCLUDED.asset_code,
+      is_active = EXCLUDED.is_active,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING *
+  `;
+
+  const values = [
+    trackerBoatData.ser_no,
+    trackerBoatData.boat_name,
+    trackerBoatData.organisation || null,
+    trackerBoatData.parade_position || null,
+    trackerBoatData.theme || null,
+    trackerBoatData.description || null,
+    trackerBoatData.asset_code || null,
+    trackerBoatData.is_active !== undefined ? trackerBoatData.is_active : true
+  ];
+
+  try {
+    const result = await pgPool.query(query, values);
+    logger.info(`✅ Tracker-boat mapping saved: ${trackerBoatData.ser_no} -> ${trackerBoatData.boat_name}`);
+    return result.rows[0];
+  } catch (error) {
+    logger.error('❌ Error creating tracker-boat mapping:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all tracker-boat mappings
+ */
+async function getTrackerBoats() {
+  logger.info('📋 Getting all tracker-boat mappings');
+
+  if (!pgPool) {
+    return inMemoryBoats.filter(b => b.is_active);
+  }
+
+  const query = `
+    SELECT * FROM tracker_boats
+    WHERE is_active = true
+    ORDER BY parade_position ASC, boat_name ASC
+  `;
+
+  try {
+    const result = await pgPool.query(query);
+    logger.info(`✅ Retrieved ${result.rows.length} tracker-boat mappings`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting tracker-boat mappings:', error);
+    throw error;
+  }
+}
+
+/**
+ * Extract GPS positions from webhook_logs for timeline (using SerNo)
+ */
+async function getGPSPositionsFromWebhooks(startTime, endTime, serNoFilter = null) {
+  logger.info('📊 Getting GPS positions from webhook_logs for timeline', {
+    startTime,
+    endTime,
+    serNoFilter
+  });
+
+  if (!pgPool) {
+    // In-memory fallback - use webhook logs
+    logger.warn('⚠️ In-memory mode: webhook timeline not fully supported');
+    return [];
+  }
+
+  let query = `
+    SELECT
+      body->>'SerNo' as ser_no,
+      CAST(body->>'Long' as DECIMAL) as longitude,
+      CAST(body->>'Lat' as DECIMAL) as latitude,
+      CAST(body->>'Alt' as DECIMAL) as altitude,
+      CAST(body->>'Speed' as DECIMAL) as speed,
+      CAST(body->>'Dir' as INTEGER) as heading,
+      created_at as timestamp,
+      body as raw_data,
+      tb.boat_name,
+      tb.organisation,
+      tb.parade_position,
+      tb.theme,
+      tb.asset_code
+    FROM webhook_logs wl
+    LEFT JOIN tracker_boats tb ON (wl.body->>'SerNo') = tb.ser_no AND tb.is_active = true
+    WHERE wl.endpoint LIKE '%kpn%'
+      AND wl.body ? 'SerNo'
+      AND wl.body ? 'Long'
+      AND wl.body ? 'Lat'
+      AND wl.created_at BETWEEN $1 AND $2
+  `;
+
+  const params = [startTime, endTime];
+
+  if (serNoFilter && serNoFilter.length > 0) {
+    query += ` AND (wl.body->>'SerNo') = ANY($3)`;
+    params.push(serNoFilter);
+  }
+
+  query += ` ORDER BY wl.created_at DESC LIMIT 1000`;
+
+  try {
+    const result = await pgPool.query(query, params);
+    logger.info(`✅ Retrieved ${result.rows.length} GPS positions from webhooks`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting GPS positions from webhooks:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get GPS positions at specific time from webhooks (for timeline)
+ */
+async function getGPSPositionsAtTimeFromWebhooks(targetTimestamp, serNoFilter = null) {
+  logger.info('📅 Getting GPS positions at time from webhooks', {
+    targetTimestamp,
+    serNoFilter
+  });
+
+  if (!pgPool) {
+    logger.warn('⚠️ In-memory mode: webhook timeline not supported');
+    return [];
+  }
+
+  // Get the latest position for each SerNo before the target time
+  let query = `
+    WITH ranked_positions AS (
+      SELECT
+        body->>'SerNo' as ser_no,
+        CAST(body->>'Long' as DECIMAL) as longitude,
+        CAST(body->>'Lat' as DECIMAL) as latitude,
+        CAST(body->>'Alt' as DECIMAL) as altitude,
+        CAST(body->>'Speed' as DECIMAL) as speed,
+        CAST(body->>'Dir' as INTEGER) as heading,
+        created_at as timestamp,
+        body as raw_data,
+        ROW_NUMBER() OVER (PARTITION BY body->>'SerNo' ORDER BY created_at DESC) as rn
+      FROM webhook_logs
+      WHERE endpoint LIKE '%kpn%'
+        AND body ? 'SerNo'
+        AND body ? 'Long'
+        AND body ? 'Lat'
+        AND created_at <= $1
+  `;
+
+  const params = [targetTimestamp];
+
+  if (serNoFilter && serNoFilter.length > 0) {
+    query += ` AND (body->>'SerNo') = ANY($2)`;
+    params.push(serNoFilter);
+  }
+
+  query += `
+    )
+    SELECT
+      rp.*,
+      tb.boat_name,
+      tb.organisation,
+      tb.parade_position,
+      tb.theme,
+      tb.asset_code
+    FROM ranked_positions rp
+    LEFT JOIN tracker_boats tb ON rp.ser_no = tb.ser_no AND tb.is_active = true
+    WHERE rp.rn = 1
+    ORDER BY tb.parade_position ASC, rp.ser_no ASC
+  `;
+
+  try {
+    const result = await pgPool.query(query, params);
+    logger.info(`✅ Retrieved ${result.rows.length} GPS positions at time from webhooks`);
+    return result.rows;
+  } catch (error) {
+    logger.error('❌ Error getting GPS positions at time from webhooks:', error);
     throw error;
   }
 }
@@ -3285,6 +3649,14 @@ module.exports = {
   getGPSPositionsAtTime,
   getGPSPositionsInTimeRange,
   getTimelineMetadata,
+  // Simplified GPS functions
+  saveGPSPositionSimple,
+  getLatestGPSPositionsSimple,
+  getGPSPositionsFromWebhooks,
+  getGPSPositionsAtTimeFromWebhooks,
+  // Tracker-boat management
+  createTrackerBoat,
+  getTrackerBoats,
   saveBoatIncident,
   getBoatPositionHistory,
   cacheSet,
