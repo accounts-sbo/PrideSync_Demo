@@ -55,6 +55,8 @@ async function initializeDatabase() {
       }
     } else {
       logger.warn('⚠️ No DATABASE_URL provided, using in-memory storage');
+      // Create demo data for in-memory mode
+      await ensureDemoBoats();
     }
 
     // Initialize Redis
@@ -794,6 +796,49 @@ async function getTrackerBoats() {
 }
 
 /**
+ * Get GPS positions at specific time from in-memory storage (for timeline)
+ */
+async function getGPSPositionsAtTimeInMemory(targetTimestamp, serNoFilter = null) {
+  logger.info('📅 Getting GPS positions at time from in-memory storage', {
+    targetTimestamp,
+    serNoFilter
+  });
+
+  const targetTime = new Date(targetTimestamp);
+  const positionsAtTime = new Map();
+
+  // Sort all positions by timestamp
+  const sortedPositions = inMemoryPositions
+    .filter(pos => new Date(pos.timestamp) <= targetTime)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  // Get the latest position for each SerNo at or before target time
+  for (const position of sortedPositions) {
+    const serNo = position.ser_no || position.tracker_name;
+    if (!positionsAtTime.has(serNo)) {
+      // Filter by SerNo if specified
+      if (!serNoFilter || serNoFilter.includes(serNo)) {
+        // Add boat information if available
+        const boat = inMemoryBoats.find(b => b.ser_no === serNo);
+        const enrichedPosition = {
+          ...position,
+          boat_name: boat?.boat_name || null,
+          organisation: boat?.organisation || null,
+          parade_position: boat?.parade_position || null,
+          theme: boat?.theme || null,
+          asset_code: boat?.asset_code || null
+        };
+        positionsAtTime.set(serNo, enrichedPosition);
+      }
+    }
+  }
+
+  const result = Array.from(positionsAtTime.values());
+  logger.info(`✅ Found ${result.length} positions at time ${targetTimestamp} (in-memory)`);
+  return result;
+}
+
+/**
  * Extract GPS positions from webhook_logs for timeline (using SerNo)
  */
 async function getGPSPositionsFromWebhooks(startTime, endTime, serNoFilter = null) {
@@ -804,9 +849,37 @@ async function getGPSPositionsFromWebhooks(startTime, endTime, serNoFilter = nul
   });
 
   if (!pgPool) {
-    // In-memory fallback - use webhook logs
-    logger.warn('⚠️ In-memory mode: webhook timeline not fully supported');
-    return [];
+    // In-memory fallback - use in-memory GPS positions
+    logger.warn('⚠️ In-memory mode: using GPS positions instead of webhooks');
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+
+    let filteredPositions = inMemoryPositions
+      .filter(pos => {
+        const posTime = new Date(pos.timestamp);
+        return posTime >= start && posTime <= end;
+      });
+
+    if (serNoFilter && serNoFilter.length > 0) {
+      filteredPositions = filteredPositions.filter(pos =>
+        serNoFilter.includes(pos.ser_no || pos.tracker_name)
+      );
+    }
+
+    // Add boat information
+    const enrichedPositions = filteredPositions.map(pos => {
+      const boat = inMemoryBoats.find(b => b.ser_no === (pos.ser_no || pos.tracker_name));
+      return {
+        ...pos,
+        boat_name: boat?.boat_name || null,
+        organisation: boat?.organisation || null,
+        parade_position: boat?.parade_position || null,
+        theme: boat?.theme || null,
+        asset_code: boat?.asset_code || null
+      };
+    });
+
+    return enrichedPositions.slice(0, 1000);
   }
 
   let query = `
@@ -2135,7 +2208,11 @@ async function getAllPrideBoats() {
  * Ensure demo boats exist in pride_boats table
  */
 async function ensureDemoBoats() {
-  if (!pgPool) return;
+  if (!pgPool) {
+    // In-memory mode - create demo boats and GPS data
+    await ensureDemoBoatsInMemory();
+    return;
+  }
 
   try {
     // Check if we have any boats
@@ -2198,6 +2275,151 @@ async function ensureDemoBoats() {
   } catch (error) {
     logger.error('❌ Error ensuring demo boats:', error);
   }
+}
+
+/**
+ * Create demo boats and GPS data for in-memory mode
+ */
+async function ensureDemoBoatsInMemory() {
+  logger.info('🚤 Creating demo boats and GPS data for in-memory mode...');
+
+  // Create demo boats if they don't exist
+  if (inMemoryBoats.length === 0) {
+    const demoBoats = [
+      {
+        id: 1,
+        ser_no: 'DEMO001',
+        boat_name: 'Rainbow Warriors',
+        organisation: 'Pride Amsterdam',
+        parade_position: 1,
+        theme: 'Music & Dance',
+        description: 'A vibrant boat celebrating music and dance with rainbow colors',
+        asset_code: 'P1',
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 2,
+        ser_no: 'DEMO002',
+        boat_name: 'Love Boat',
+        organisation: 'COC Nederland',
+        parade_position: 2,
+        theme: 'Love & Unity',
+        description: 'Spreading love and unity across the Amsterdam canals',
+        asset_code: 'P2',
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      },
+      {
+        id: 3,
+        ser_no: 'DEMO003',
+        boat_name: 'Freedom Float',
+        organisation: 'EuroPride',
+        parade_position: 3,
+        theme: 'Freedom',
+        description: 'Celebrating freedom and equality for all',
+        asset_code: 'P3',
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ];
+
+    inMemoryBoats.push(...demoBoats);
+    logger.info(`✅ Created ${demoBoats.length} demo boats (in-memory)`);
+  }
+
+  // Create demo GPS positions for timeline
+  await createDemoGPSPositions();
+}
+
+/**
+ * Create demo GPS positions for timeline functionality
+ */
+async function createDemoGPSPositions() {
+  logger.info('📍 Creating demo GPS positions for timeline...');
+
+  // Amsterdam Pride route coordinates (simplified)
+  const routeCoordinates = [
+    { lat: 52.3676, lng: 4.9041 }, // Start: Westerdok
+    { lat: 52.3686, lng: 4.9051 }, // Prinsengracht
+    { lat: 52.3696, lng: 4.9061 }, // Noorderkerk
+    { lat: 52.3706, lng: 4.9071 }, // Brouwersgracht
+    { lat: 52.3716, lng: 4.9081 }, // Herengracht
+    { lat: 52.3726, lng: 4.9091 }, // Keizersgracht
+    { lat: 52.3736, lng: 4.9101 }, // Prinsengracht
+    { lat: 52.3746, lng: 4.9111 }, // Amstel
+  ];
+
+  const boats = [
+    { ser_no: 'DEMO001', tracker_name: 'DEMO001' },
+    { ser_no: 'DEMO002', tracker_name: 'DEMO002' },
+    { ser_no: 'DEMO003', tracker_name: 'DEMO003' }
+  ];
+
+  // Create positions for today from 10:00 to 18:00
+  const today = new Date();
+  today.setHours(10, 0, 0, 0); // Start at 10:00
+
+  const endTime = new Date(today);
+  endTime.setHours(18, 0, 0, 0); // End at 18:00
+
+  let positionId = inMemoryPositions.length + 1;
+
+  // Generate positions every 5 minutes
+  for (let time = new Date(today); time <= endTime; time.setMinutes(time.getMinutes() + 5)) {
+    boats.forEach((boat, boatIndex) => {
+      // Calculate position along route based on time
+      const totalMinutes = (endTime - today) / (1000 * 60);
+      const currentMinutes = (time - today) / (1000 * 60);
+      const progress = currentMinutes / totalMinutes;
+
+      // Add some offset between boats
+      const boatProgress = Math.max(0, Math.min(1, progress - (boatIndex * 0.1)));
+      const routeIndex = Math.floor(boatProgress * (routeCoordinates.length - 1));
+      const nextIndex = Math.min(routeIndex + 1, routeCoordinates.length - 1);
+
+      // Interpolate between route points
+      const segmentProgress = (boatProgress * (routeCoordinates.length - 1)) - routeIndex;
+      const currentPoint = routeCoordinates[routeIndex];
+      const nextPoint = routeCoordinates[nextIndex];
+
+      const lat = currentPoint.lat + (nextPoint.lat - currentPoint.lat) * segmentProgress;
+      const lng = currentPoint.lng + (nextPoint.lng - currentPoint.lng) * segmentProgress;
+
+      // Add some random variation
+      const latVariation = (Math.random() - 0.5) * 0.0002;
+      const lngVariation = (Math.random() - 0.5) * 0.0002;
+
+      const position = {
+        id: positionId++,
+        ser_no: boat.ser_no,
+        tracker_name: boat.tracker_name,
+        latitude: lat + latVariation,
+        longitude: lng + lngVariation,
+        altitude: 2.0 + Math.random() * 2.0,
+        accuracy: 5.0 + Math.random() * 5.0,
+        speed: 3.0 + Math.random() * 2.0, // 3-5 km/h
+        heading: 90 + Math.random() * 20 - 10, // Roughly east with variation
+        timestamp: new Date(time).toISOString(),
+        received_at: new Date(time).toISOString(),
+        raw_data: {
+          SerNo: boat.ser_no,
+          Lat: lat + latVariation,
+          Long: lng + lngVariation,
+          Alt: 2.0 + Math.random() * 2.0,
+          Speed: 3.0 + Math.random() * 2.0,
+          Dir: 90 + Math.random() * 20 - 10
+        }
+      };
+
+      inMemoryPositions.push(position);
+    });
+  }
+
+  logger.info(`✅ Created ${inMemoryPositions.length} demo GPS positions for timeline`);
 }
 
 // === NEW CRUD FUNCTIONS FOR RESTRUCTURED DATABASE ===
@@ -2500,7 +2722,55 @@ async function getDatabaseStats() {
 
   if (!pgPool) {
     logger.warn('❌ No database connection for stats');
-    return { tables: [], total_tables: 0, total_rows: 0 };
+    // Return in-memory data statistics
+    const inMemoryTables = [
+      {
+        table_name: 'tracker_boats (in-memory)',
+        row_count: inMemoryBoats.length,
+        columns: [
+          { column_name: 'id', data_type: 'integer' },
+          { column_name: 'ser_no', data_type: 'varchar' },
+          { column_name: 'boat_name', data_type: 'varchar' },
+          { column_name: 'organisation', data_type: 'varchar' },
+          { column_name: 'parade_position', data_type: 'integer' },
+          { column_name: 'theme', data_type: 'text' },
+          { column_name: 'asset_code', data_type: 'varchar' }
+        ]
+      },
+      {
+        table_name: 'gps_positions (in-memory)',
+        row_count: inMemoryPositions.length,
+        columns: [
+          { column_name: 'id', data_type: 'integer' },
+          { column_name: 'ser_no', data_type: 'varchar' },
+          { column_name: 'latitude', data_type: 'decimal' },
+          { column_name: 'longitude', data_type: 'decimal' },
+          { column_name: 'timestamp', data_type: 'timestamp' },
+          { column_name: 'speed', data_type: 'decimal' },
+          { column_name: 'heading', data_type: 'integer' }
+        ]
+      },
+      {
+        table_name: 'webhook_logs (in-memory)',
+        row_count: inMemoryWebhookLogs.length,
+        columns: [
+          { column_name: 'id', data_type: 'integer' },
+          { column_name: 'endpoint', data_type: 'varchar' },
+          { column_name: 'method', data_type: 'varchar' },
+          { column_name: 'response_status', data_type: 'integer' },
+          { column_name: 'created_at', data_type: 'timestamp' }
+        ]
+      }
+    ];
+
+    const totalRows = inMemoryTables.reduce((sum, table) => sum + table.row_count, 0);
+
+    return {
+      tables: inMemoryTables,
+      total_tables: inMemoryTables.length,
+      total_rows: totalRows,
+      mode: 'in-memory'
+    };
   }
 
   try {
@@ -3654,6 +3924,7 @@ module.exports = {
   getLatestGPSPositionsSimple,
   getGPSPositionsFromWebhooks,
   getGPSPositionsAtTimeFromWebhooks,
+  getGPSPositionsAtTimeInMemory,
   // Tracker-boat management
   createTrackerBoat,
   getTrackerBoats,

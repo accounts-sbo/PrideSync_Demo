@@ -1119,19 +1119,35 @@ router.get('/gps-timeline/at-time', async (req, res) => {
 
     const serNoFilter = trackers ? trackers.split(',').map(t => t.trim()) : null;
 
-    // Use webhook-based timeline data
-    const positions = await database.getGPSPositionsAtTimeFromWebhooks(timestamp, serNoFilter);
+    // Try webhook-based timeline data first, fallback to in-memory GPS positions
+    let positions = [];
+    let source = 'webhooks';
+
+    try {
+      positions = await database.getGPSPositionsAtTimeFromWebhooks(timestamp, serNoFilter);
+      // If webhook returns empty array, try in-memory GPS positions
+      if (positions.length === 0) {
+        logger.warn('Webhook timeline returned no data, trying in-memory GPS positions');
+        positions = await database.getGPSPositionsAtTimeInMemory(timestamp, serNoFilter);
+        source = 'gps_positions';
+      }
+    } catch (webhookError) {
+      logger.warn('Webhook timeline failed, using in-memory GPS positions:', webhookError.message);
+      // Fallback to in-memory GPS positions using SerNo
+      positions = await database.getGPSPositionsAtTimeInMemory(timestamp, serNoFilter);
+      source = 'gps_positions';
+    }
 
     res.json({
       success: true,
       data: positions,
       count: positions.length,
       timestamp: timestamp,
-      source: 'webhooks',
+      source: source,
       requestedAt: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error fetching GPS positions at time from webhooks:', error);
+    logger.error('Error fetching GPS positions at time:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch GPS positions at time',
